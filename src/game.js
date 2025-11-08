@@ -385,8 +385,9 @@ loader.load('./assets/venue.glb', (gltf) => {
   console.log('Venue loaded with', venueMeshes.length, 'meshes for collision');
   
   // Create a clickable screenshot inside the venue
-  const screenshotTexture = textureLoader.load('./assets/groundtexture.png'); // Placeholder texture
-  const screenshotGeometry = new THREE.PlaneGeometry(10, 7); // Screen size
+  const screen
+  const screenshotTexture = textureLoader.load('./assets/au-room-schedule-screenshot.png'); // Placeholder texture
+  const screenshotGeometry = new THREE.PlaneGeometry(20, ); // Screen size
   const screenshotMaterial = new THREE.MeshStandardMaterial({ 
     map: screenshotTexture,
     side: THREE.DoubleSide,
@@ -396,7 +397,7 @@ loader.load('./assets/venue.glb', (gltf) => {
   screenshotMesh = new THREE.Mesh(screenshotGeometry, screenshotMaterial);
   
   // Position screenshot inside the venue (adjust as needed)
-  screenshotMesh.position.set(edgeX, venueGroundHeight + 5, edgeZ -20);
+  screenshotMesh.position.set(edgeX, venueGroundHeight + 5, edgeZ - 10);
   screenshotMesh.rotation.y = Math.PI; // Face towards the entrance
   screenshotMesh.userData.isClickable = true;
   scene.add(screenshotMesh);
@@ -416,11 +417,13 @@ loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
   ocamlModel = ocamlGltf.scene;
   
   // Scale OCaml to 2x Mohamed's size (Mohamed is roughly 2 units tall)
-  ocamlModel.scale.set(16, 16, 16);
+  ocamlModel.scale.set(6, 6, 6);
   
-  // Position at spawn (0, 0) on the terrain
-  const spawnHeight = getTerrainHeight(0, 0);
-  ocamlModel.position.set(0, spawnHeight, 0);
+  // Position at spawn (0, 0) on the terrain;
+  ocamlModel.position.set(3.7, 8.2, 18.2);
+
+  // Rotate him 180 degrees to face the camera
+  ocamlModel.rotation.y = Math.PI;  
   
   // Build BVH for OCaml meshes and enable shadows
   ocamlModel.traverse((node) => {
@@ -452,6 +455,8 @@ loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
   }
   
   scene.add(ocamlModel);
+
+
   console.log('OCaml placed at spawn position with', ocamlMeshes.length, 'meshes for collision');
 }, undefined, (err) => {
   console.error('Error loading OCaml:', err);
