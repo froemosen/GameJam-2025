@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>MikkelUndKristians Super Awesome GameJam game</title>
+		<style>
+			html,body{height:100%;margin:0}
+			body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+			#canvas-container{width:100%;height:100%;display:block;overflow:hidden}
+			#overlay{position:fixed;left:12px;top:12px;color:#fff;background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:6px}
+			#instructions{font-size:13px;line-height:1.4}
+			a { color: #9cf }
+		</style>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "https://unpkg.com/three@0.152.2/build/three.module.js",
+					"three/addons/": "https://unpkg.com/three@0.152.2/examples/jsm/"
+				}
+			}
+		</script>
+	</head>
+	<body>
+		<div id="canvas-container"></div>
+		<div id="overlay">
+			<div id="instructions">
+				<strong>Control Mohamed</strong>
+				<div>W/A/S/D or Arrow keys — move</div>
+				<div>Space — jump</div>
+				<div>Mouse — look around (click to lock pointer)</div>
+				<div style="margin-top:6px;font-size:12px;opacity:0.9">Mohamed animates: idle → walk → run</div>
+			</div>
+		</div>
+
+		<!-- Game module (uses ES modules and CDN for Three.js) -->
+		<script type="module">
+			import './src/game.js';
+		</script>
+	</body>
+</html>
+
