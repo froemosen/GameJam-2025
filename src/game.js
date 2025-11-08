@@ -339,18 +339,24 @@ let ocamlModel = null;
 // Castle meshes for BVH collision
 let venueMeshes = [];
 
+// Screenshot and iframe functionality
+let screenshotMesh = null;
+let venueIframe = null;
+let venueCSS3DObject = null;
+let isVenueIframeVisible = false;
+
 loader.load('./assets/venue.glb', (gltf) => {
   venueModel = gltf.scene;
   
   // Scale the castle
-  venueModel.scale.set(20,20,20);
+  venueModel.scale.set(2,2,2);
   
   // Position at the very edge of the world (terrain is 200x200, center at 0,0)
   // Place it so the edge of castle is at the edge of terrain
-  const edgeX = 95; // Near the edge at x=100
-  const edgeZ = 95; // Near the edge at z=100
+  const edgeX = 0; // Near the edge at x=100
+  const edgeZ = 0; // Near the edge at z=100
   
-  const venueGroundHeight = getTerrainHeight(edgeX, edgeZ);
+  const venueGroundHeight = getTerrainHeight(edgeX, edgeZ)+3;
   venueModel.position.set(edgeX, venueGroundHeight, edgeZ);
   
   // Build BVH for all castle meshes and collect them
@@ -363,11 +369,39 @@ loader.load('./assets/venue.glb', (gltf) => {
       // Enable shadows
       node.castShadow = true;
       node.receiveShadow = true;
+      
+      // Add debug wireframe to show collision mesh
+      const wireframeGeometry = new THREE.WireframeGeometry(node.geometry);
+      const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+      const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+      wireframe.position.copy(node.position);
+      wireframe.rotation.copy(node.rotation);
+      wireframe.scale.copy(node.scale);
+      node.add(wireframe); // Attach to the mesh so it moves with it
     }
   });
   
   scene.add(venueModel);
   console.log('Venue loaded with', venueMeshes.length, 'meshes for collision');
+  
+  // Create a clickable screenshot inside the venue
+  const screenshotTexture = textureLoader.load('./assets/groundtexture.png'); // Placeholder texture
+  const screenshotGeometry = new THREE.PlaneGeometry(10, 7); // Screen size
+  const screenshotMaterial = new THREE.MeshStandardMaterial({ 
+    map: screenshotTexture,
+    side: THREE.DoubleSide,
+    emissive: 0x222222,
+    emissiveIntensity: 0.3
+  });
+  screenshotMesh = new THREE.Mesh(screenshotGeometry, screenshotMaterial);
+  
+  // Position screenshot inside the venue (adjust as needed)
+  screenshotMesh.position.set(edgeX, venueGroundHeight + 5, edgeZ -20);
+  screenshotMesh.rotation.y = Math.PI; // Face towards the entrance
+  screenshotMesh.userData.isClickable = true;
+  scene.add(screenshotMesh);
+  
+  console.log('Screenshot added to venue at:', screenshotMesh.position);
   
 }, undefined, (err) => {
   console.error('Error loading venue:', err);
@@ -397,6 +431,15 @@ loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
       
       node.castShadow = true;
       node.receiveShadow = true;
+      
+      // Add debug wireframe to show collision mesh
+      const wireframeGeometry = new THREE.WireframeGeometry(node.geometry);
+      const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+      const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+      wireframe.position.copy(node.position);
+      wireframe.rotation.copy(node.rotation);
+      wireframe.scale.copy(node.scale);
+      node.add(wireframe); // Attach to the mesh so it moves with it
     }
   });
   
@@ -416,7 +459,7 @@ loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
 
 // Create cinema-style screen with iframe
 const iframe = document.createElement('iframe');
-iframe.src = 'https://aaron-strategies-ent-regional.trycloudflare.com/';
+iframe.src = 'https://bytes-theta-gets-interior.trycloudflare.com/';
 iframe.style.width = '1920px';
 iframe.style.height = '1080px';
 iframe.style.border = '0';
@@ -426,7 +469,7 @@ const css3DObject = new CSS3DObject(iframe);
 css3DObject.position.set(50, 15, 50); // Position near spawn
 css3DObject.rotation.y = (Math.PI*1.2) ; // Angle towards spawn
 css3DObject.scale.set(0.02, 0.02, 0.02); // Scale down to reasonable size
-scene.add(css3DObject);
+//scene.add(css3DObject);
 
 // Create a backing plane for the cinema screen (black frame)
 const screenGeometry = new THREE.PlaneGeometry(38.4, 21.6); // 16:9 aspect ratio
@@ -435,9 +478,65 @@ const screenMesh = new THREE.Mesh(screenGeometry, screenMaterial);
 screenMesh.position.copy(css3DObject.position);
 screenMesh.rotation.copy(css3DObject.rotation);
 screenMesh.position.z += 1; // Slightly behind the iframe
-scene.add(screenMesh);
+//scene.add(screenMesh);
 
 console.log('Cinema screen created at position:', css3DObject.position);
+
+// Function to show venue iframe
+function showVenueIframe() {
+  if (!venueIframe) {
+    // Create iframe for venue screenshot
+    venueIframe = document.createElement('iframe');
+    venueIframe.src = 'http://TEST';
+    venueIframe.style.width = '1920px';
+    venueIframe.style.height = '1080px';
+    venueIframe.style.border = '0';
+    venueIframe.style.pointerEvents = 'auto';
+    
+    venueCSS3DObject = new CSS3DObject(venueIframe);
+    venueCSS3DObject.position.set(0, 10, -50); // Position in front of camera
+    venueCSS3DObject.scale.set(0.02, 0.02, 0.02);
+    scene.add(venueCSS3DObject);
+  }
+  
+  // Exit pointer lock to allow iframe interaction
+  document.exitPointerLock();
+  isVenueIframeVisible = true;
+  cssRenderer.domElement.style.pointerEvents = 'auto';
+  
+  // Update iframe position relative to camera
+  updateVenueIframePosition();
+  
+  console.log('Venue iframe displayed');
+}
+
+// Function to hide venue iframe
+function hideVenueIframe() {
+  if (venueCSS3DObject && isVenueIframeVisible) {
+    scene.remove(venueCSS3DObject);
+    isVenueIframeVisible = false;
+    cssRenderer.domElement.style.pointerEvents = 'none';
+    
+    // Re-lock pointer
+    renderer.domElement.requestPointerLock();
+    
+    console.log('Venue iframe hidden');
+  }
+}
+
+// Function to update iframe position to follow camera
+function updateVenueIframePosition() {
+  if (venueCSS3DObject && isVenueIframeVisible) {
+    // Position iframe in front of camera
+    const distance = 50;
+    const iframeX = camera.position.x - Math.sin(cameraYaw) * distance;
+    const iframeZ = camera.position.z - Math.cos(cameraYaw) * distance;
+    const iframeY = camera.position.y;
+    
+    venueCSS3DObject.position.set(iframeX, iframeY, iframeZ);
+    venueCSS3DObject.rotation.y = cameraYaw;
+  }
+}
 
 // Camera rotation state
 let cameraYaw = 0; // Horizontal rotation (left-right)
@@ -445,8 +544,28 @@ let cameraPitch = 0.3; // Vertical rotation (up-down), start slightly looking do
 let isPointerLocked = false;
 let isCinemaMode = false;
 
+// Raycaster for click detection
+const clickRaycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
 // Request pointer lock on click
-document.addEventListener('click', () => {
+document.addEventListener('click', (event) => {
+  // Check if clicking on screenshot when pointer is locked
+  if (isPointerLocked && screenshotMesh) {
+    // Calculate mouse position in normalized device coordinates (-1 to +1)
+    mouse.x = 0; // Center of screen in pointer lock
+    mouse.y = 0;
+    
+    clickRaycaster.setFromCamera(mouse, camera);
+    const intersects = clickRaycaster.intersectObject(screenshotMesh);
+    
+    if (intersects.length > 0) {
+      // Clicked on screenshot - show iframe
+      showVenueIframe();
+      return;
+    }
+  }
+  
   renderer.domElement.requestPointerLock();
 });
 
@@ -484,6 +603,12 @@ let velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 
 function onKeyDown(e) {
+  // Check for Escape key to close venue iframe
+  if (e.code === 'Escape' && isVenueIframeVisible) {
+    hideVenueIframe();
+    return;
+  }
+  
   switch (e.code) {
     case 'ArrowUp':
     case 'KeyW': move.forward = 1; break;
@@ -495,7 +620,7 @@ function onKeyDown(e) {
     case 'KeyD': move.right = -1; break;
     case 'Space':
       if (canJump) { 
-        velocity.y += 5; 
+        velocity.y += 10; 
         canJump = false;
         // Play jump sound
         if (jumpingSound.buffer && !jumpingSound.isPlaying) {
@@ -609,8 +734,33 @@ function animate() {
     const dx = direction.x * cos - direction.z * sin;
     const dz = direction.x * sin + direction.z * cos;
     
+    // Store old position for collision detection
+    const oldX = character.position.x;
+    const oldZ = character.position.z;
+    
+    // Apply movement
     character.position.x += -dx * speed * delta;
     character.position.z += dz * speed * delta;
+    
+    // Check for horizontal collision with venue and OCaml
+    const collidableMeshes = [...ocamlMeshes, ...venueMeshes];
+    if (collidableMeshes.length > 0) {
+      const horizontalRaycaster = new THREE.Raycaster();
+      const playerHeight = 1.0; // Check at player's center height
+      const rayOrigin = new THREE.Vector3(character.position.x, character.position.y + playerHeight, character.position.z);
+      const moveDirection = new THREE.Vector3(-dx, 0, dz).normalize();
+      
+      horizontalRaycaster.set(rayOrigin, moveDirection);
+      horizontalRaycaster.far = 2; // Check 2 units ahead
+      
+      const horizontalIntersects = horizontalRaycaster.intersectObjects(collidableMeshes, false);
+      
+      if (horizontalIntersects.length > 0 && horizontalIntersects[0].distance < 1.5) {
+        // Collision detected - revert position
+        character.position.x = oldX;
+        character.position.z = oldZ;
+      }
+    }
     
     // Rotate Mohamed to face movement direction (inverted to match camera perspective)
     if (mohamedModel) {
@@ -639,10 +789,19 @@ function animate() {
     const intersects = raycaster.intersectObjects(collidableMeshes, false);
     
     if (intersects.length > 0) {
-      // Found geometry below character
-      const meshHeight = intersects[0].point.y;
-      // Use mesh height if it's higher than terrain
-      terrainHeight = Math.max(terrainHeight, meshHeight);
+      // Find the highest intersect that is below the player's head
+      const playerHeadHeight = character.position.y + 2; // Player head is ~2 units above position
+      let validMeshHeight = terrainHeight;
+      
+      for (const intersect of intersects) {
+        const intersectY = intersect.point.y;
+        // Only consider this surface as floor if it's below the player's head
+        if (intersectY < playerHeadHeight) {
+          validMeshHeight = Math.max(validMeshHeight, intersectY);
+        }
+      }
+      
+      terrainHeight = validMeshHeight;
     }
   }
   
@@ -750,6 +909,9 @@ function animate() {
       
     
     }
+
+    console.log('Character Y:', character.position.y.toFixed(2), 'Terrain Height:', terrainHeight.toFixed(2));
+    
   }
 
   // Position camera based on yaw and pitch
@@ -779,6 +941,11 @@ function animate() {
   const coordsElement = document.getElementById('coordinates');
   if (coordsElement) {
     coordsElement.textContent = `Position: X: ${character.position.x.toFixed(1)}, Y: ${character.position.y.toFixed(1)}, Z: ${character.position.z.toFixed(1)}`;
+  }
+
+  // Update venue iframe position if visible
+  if (isVenueIframeVisible) {
+    updateVenueIframePosition();
   }
 
   renderer.render(scene, camera);

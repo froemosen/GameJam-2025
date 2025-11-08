@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5500:5500"
+    environment:
+      - PORT=5500
+      - FLASK_ENV=production
+    volumes:
+      - ./assets:/app/assets:ro
+      - ./src:/app/src:ro
+      - ./index.html:/app/index.html:ro
+    restart: unless-stopped
