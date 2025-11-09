@@ -1195,69 +1195,134 @@ function showVenueIframe(url = "MIKKEL_APP") {
     iframeContainer.style.width = '100vw';
     iframeContainer.style.height = '100vh';
     iframeContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-    iframeContainer.style.zIndex = '1000';
+    iframeContainer.style.zIndex = '9999';
     iframeContainer.style.display = 'flex';
     iframeContainer.style.alignItems = 'center';
     iframeContainer.style.justifyContent = 'center';
+    iframeContainer.style.overflow = 'hidden';
     
-    // Create close button
+    // Create close button - mobile-friendly design
     const closeButton = document.createElement('button');
-    closeButton.innerHTML = '✕ Close (ESC)';
-    closeButton.style.position = 'absolute';
-    closeButton.style.top = '20px';
-    closeButton.style.right = '20px';
-    closeButton.style.padding = '10px 20px';
-    closeButton.style.fontSize = '16px';
-    closeButton.style.backgroundColor = '#ff4444';
+    closeButton.innerHTML = '✕';
+    closeButton.id = 'close-iframe-button';
+    closeButton.style.position = 'fixed';
+    closeButton.style.top = '15px';
+    closeButton.style.right = '15px';
+    closeButton.style.width = '50px';
+    closeButton.style.height = '50px';
+    closeButton.style.padding = '0';
+    closeButton.style.fontSize = '32px';
+    closeButton.style.fontWeight = 'bold';
+    closeButton.style.lineHeight = '50px';
+    closeButton.style.textAlign = 'center';
+    closeButton.style.backgroundColor = 'rgba(255, 68, 68, 0.95)';
     closeButton.style.color = 'white';
-    closeButton.style.border = 'none';
-    closeButton.style.borderRadius = '4px';
+    closeButton.style.border = '2px solid white';
+    closeButton.style.borderRadius = '50%';
     closeButton.style.cursor = 'pointer';
-    closeButton.style.zIndex = '1001';
-    closeButton.onclick = hideVenueIframe;
+    closeButton.style.zIndex = '999999';
+    closeButton.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.5)';
+    closeButton.style.display = 'flex';
+    closeButton.style.alignItems = 'center';
+    closeButton.style.justifyContent = 'center';
+    closeButton.style.touchAction = 'manipulation';
+    closeButton.style.webkitTapHighlightColor = 'transparent';
+    closeButton.style.userSelect = 'none';
+    closeButton.style.webkitUserSelect = 'none';
+    closeButton.style.pointerEvents = 'auto';
+    closeButton.style.transition = 'transform 0.1s ease, background-color 0.2s ease';
+    
+    // Add hover/active effects
+    closeButton.onmouseenter = () => {
+      closeButton.style.transform = 'scale(1.1)';
+      closeButton.style.backgroundColor = 'rgba(255, 0, 0, 1)';
+    };
+    closeButton.onmouseleave = () => {
+      closeButton.style.transform = 'scale(1)';
+      closeButton.style.backgroundColor = 'rgba(255, 68, 68, 0.95)';
+    };
+    
+    // Add multiple event handlers with better event handling
+    const closeHandler = (e) => {
+      console.log('Close button event triggered:', e.type);
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      hideVenueIframe();
+      return false;
+    };
+    
+    closeButton.addEventListener('touchstart', closeHandler, { passive: false, capture: true });
+    closeButton.addEventListener('touchend', closeHandler, { passive: false, capture: true });
+    closeButton.addEventListener('click', closeHandler, { capture: true });
+    closeButton.addEventListener('mousedown', closeHandler, { capture: true });
+    
+    // Create iframe wrapper to control sizing better
+    const iframeWrapper = document.createElement('div');
+    iframeWrapper.style.position = 'relative';
+    iframeWrapper.style.width = '90vw';
+    iframeWrapper.style.height = '70vh';
+    iframeWrapper.style.maxWidth = '1000px';
+    iframeWrapper.style.maxHeight = '700px';
+    iframeWrapper.style.margin = '20px';
     
     // Create iframe as a simple 2D overlay
     venueIframe = document.createElement('iframe');
     venueIframe.src = url;
-    venueIframe.style.width = '80vw';
-    venueIframe.style.height = '80vh';
-    venueIframe.style.maxWidth = '1200px';
-    venueIframe.style.maxHeight = '800px';
+    venueIframe.style.width = '100%';
+    venueIframe.style.height = '100%';
     venueIframe.style.border = '2px solid #333';
     venueIframe.style.borderRadius = '8px';
     venueIframe.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
     venueIframe.style.backgroundColor = '#000';
+    venueIframe.style.display = 'block';
     
-    iframeContainer.appendChild(closeButton);
-    iframeContainer.appendChild(venueIframe);
+    iframeWrapper.appendChild(venueIframe);
+    iframeContainer.appendChild(iframeWrapper);
     document.body.appendChild(iframeContainer);
+    document.body.appendChild(closeButton); // Append close button directly to body for highest priority
     
-    // Store reference to container
+    // Store references
     venueIframe._container = iframeContainer;
+    venueIframe._closeButton = closeButton;
   } else {
     // Show existing iframe and update URL
     venueIframe.src = url;
     venueIframe._container.style.display = 'flex';
+    if (venueIframe._closeButton) {
+      venueIframe._closeButton.style.display = 'flex';
+    }
     console.log('Updating iframe URL to:', url);
   }
   
-  // Exit pointer lock to allow iframe interaction
-  document.exitPointerLock();
+  // Set flag FIRST before any other actions
   isVenueIframeVisible = true;
   
-  console.log('Venue iframe displayed with URL:', url);
+  // Exit pointer lock to allow iframe interaction
+  document.exitPointerLock();
+  
+  console.log('Venue iframe displayed. isVenueIframeVisible =', isVenueIframeVisible);
 }
 
 // Function to hide venue iframe
 function hideVenueIframe() {
+  console.log('hideVenueIframe called. isVenueIframeVisible =', isVenueIframeVisible);
+  
   if (venueIframe && isVenueIframeVisible) {
     venueIframe._container.style.display = 'none';
+    if (venueIframe._closeButton) {
+      venueIframe._closeButton.style.display = 'none';
+    }
     isVenueIframeVisible = false;
     
-    // Re-lock pointer
-    renderer.domElement.requestPointerLock();
+    // Only try to re-lock pointer on desktop (not mobile)
+    if (!('ontouchstart' in window)) {
+      renderer.domElement.requestPointerLock();
+    }
     
-    console.log('Venue iframe hidden');
+    console.log('Venue iframe hidden. isVenueIframeVisible now =', isVenueIframeVisible);
+  } else {
+    console.log('hideVenueIframe: conditions not met. venueIframe exists:', !!venueIframe);
   }
 }
 
@@ -1511,28 +1576,63 @@ if (jumpButton) {
 
 // Mobile touch controls for camera rotation
 let isTouchRotating = false;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
 let lastTouchX = 0;
 let lastTouchY = 0;
+let hasDragged = false;
 
 document.addEventListener('touchstart', (e) => {
+  // Don't handle game touches when iframe is open
+  if (isVenueIframeVisible) {
+    console.log('touchstart blocked - iframe is visible');
+    return;
+  }
+  
   // Only handle camera rotation if touching outside controls
   const touch = e.touches[0];
+  const touchX = touch.clientX;
   const touchY = touch.clientY;
   
   // Check if touch is in upper 2/3 of screen (not on controls)
   if (touchY < window.innerHeight * 0.66) {
+    e.preventDefault(); // Prevent page scrolling
     isTouchRotating = true;
-    lastTouchX = touch.clientX;
-    lastTouchY = touch.clientY;
+    touchStartX = touchX;
+    touchStartY = touchY;
+    touchStartTime = Date.now();
+    lastTouchX = touchX;
+    lastTouchY = touchY;
+    hasDragged = false;
+    console.log('Camera rotation started');
   }
-});
+}, { passive: false });
 
 document.addEventListener('touchmove', (e) => {
+  // Don't handle game touches when iframe is open
+  if (isVenueIframeVisible) {
+    console.log('touchmove blocked - iframe is visible');
+    return;
+  }
   if (!isTouchRotating) return;
+  
+  // Prevent page scrolling
+  e.preventDefault();
   
   const touch = e.touches[0];
   const deltaX = touch.clientX - lastTouchX;
   const deltaY = touch.clientY - lastTouchY;
+  
+  // Check if user has dragged enough to be considered camera rotation (not a tap)
+  const totalDragDistance = Math.sqrt(
+    Math.pow(touch.clientX - touchStartX, 2) + 
+    Math.pow(touch.clientY - touchStartY, 2)
+  );
+  
+  if (totalDragDistance > 10) { // Threshold for distinguishing tap from drag
+    hasDragged = true;
+  }
   
   const sensitivity = 0.005;
   cameraYaw -= deltaX * sensitivity;
@@ -1543,10 +1643,68 @@ document.addEventListener('touchmove', (e) => {
   
   lastTouchX = touch.clientX;
   lastTouchY = touch.clientY;
-});
+}, { passive: false });
 
-document.addEventListener('touchend', () => {
+document.addEventListener('touchend', (e) => {
+  // Don't handle game touches when iframe is open
+  if (isVenueIframeVisible) {
+    console.log('touchend blocked - iframe is visible');
+    return;
+  }
+  
+  // Only process tap if we were tracking a touch
+  if (!isTouchRotating) return;
+  
+  // Check if this was a tap (not dragged and quick)
+  const touchDuration = Date.now() - touchStartTime;
+  const wasTap = !hasDragged && touchDuration < 300; // Less than 300ms = tap
+  
+  if (wasTap && e.changedTouches && e.changedTouches.length > 0) {
+    const touch = e.changedTouches[0];
+    
+    console.log('Tap detected at:', touch.clientX, touch.clientY);
+    
+    // Convert touch coordinates to normalized device coordinates
+    mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+    
+    clickRaycaster.setFromCamera(mouse, camera);
+    
+    // Check for cinema button clicks
+    if (leftCinemaButton && rightCinemaButton) {
+      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+      if (buttonIntersects.length > 0) {
+        const clickedButton = buttonIntersects[0].object;
+        if (clickedButton.userData.buttonType) {
+          console.log('Cinema button tapped:', clickedButton.userData.buttonType);
+          switchCinemaImage(clickedButton.userData.buttonType);
+          isTouchRotating = false;
+          hasDragged = false;
+          return;
+        }
+      }
+    }
+    
+    // Check if tapping on screenshot
+    if (screenshotMesh) {
+      const intersects = clickRaycaster.intersectObject(screenshotMesh);
+      if (intersects.length > 0) {
+        console.log('Screenshot tapped! Opening iframe...');
+        // Tapped on screenshot - show iframe with URL based on current image
+        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+        showVenueIframe(url);
+        isTouchRotating = false;
+        hasDragged = false;
+        return;
+      } else {
+        console.log('No intersection with screenshot');
+      }
+    }
+  }
+  
+  // Reset state
   isTouchRotating = false;
+  hasDragged = false;
 });
 
 // Camera follow offset

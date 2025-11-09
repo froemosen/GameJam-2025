@@ -12,4 +12,4 @@ services:
       - ./assets:/app/assets:ro
       - ./src:/app/src:ro
       - ./index.html:/app/index.html:ro
-    restart: unless-stopped
+    restart: always
