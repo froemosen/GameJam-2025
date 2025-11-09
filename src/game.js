@@ -17,6 +17,95 @@ const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
 const wireframeDebug = false;
 const ANTI_FLICKER_HEIGHT = 0.01; // Height offset to reduce z-fighting flickering
 
+// Asset caching system using IndexedDB
+class AssetCache {
+  constructor() {
+    this.dbName = 'GameAssetCache';
+    this.dbVersion = 1;
+    this.storeName = 'assets';
+    this.db = null;
+  }
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        console.log('Asset cache initialized');
+        resolve();
+      };
+      
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName, { keyPath: 'url' });
+        }
+      };
+    });
+  }
+
+  async get(url) {
+    if (!this.db) return null;
+    
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([this.storeName], 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.get(url);
+      
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result) {
+          console.log('Loaded from cache:', url);
+          resolve(result.data);
+        } else {
+          resolve(null);
+        }
+      };
+      request.onerror = () => resolve(null);
+    });
+  }
+
+  async set(url, data) {
+    if (!this.db) return;
+    
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([this.storeName], 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.put({ url, data, timestamp: Date.now() });
+      
+      request.onsuccess = () => {
+        console.log('Cached asset:', url);
+        resolve();
+      };
+      request.onerror = () => resolve(); // Fail silently
+    });
+  }
+
+  async clear() {
+    if (!this.db) return;
+    
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([this.storeName], 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.clear();
+      
+      request.onsuccess = () => {
+        console.log('Asset cache cleared');
+        resolve();
+      };
+      request.onerror = () => resolve();
+    });
+  }
+}
+
+// Initialize cache
+const assetCache = new AssetCache();
+await assetCache.init().catch(err => {
+  console.warn('Failed to initialize asset cache:', err);
+});
+
 let ocamlMixers = [];
 let ocamlsMeshes = [];
 
@@ -295,8 +384,72 @@ terrainLOD.addLevel(baseTerrainVeryLow, 500); // 500+ units: very low detail
 
 scene.add(terrainLOD);
 
+// Create cached texture loader
+class CachedTextureLoader extends THREE.TextureLoader {
+  load(url, onLoad, onProgress, onError) {
+    // Create a placeholder texture that will be returned immediately
+    const texture = new THREE.Texture();
+    
+    assetCache.get(url).then(cachedData => {
+      if (cachedData) {
+        // Load from cache
+        const blob = new Blob([cachedData], { type: 'image/png' });
+        const objectURL = URL.createObjectURL(blob);
+        const image = new Image();
+        image.onload = () => {
+          texture.image = image;
+          texture.needsUpdate = true;
+          URL.revokeObjectURL(objectURL);
+          if (onLoad) onLoad(texture);
+          this.manager.itemEnd(url);
+        };
+        image.onerror = onError;
+        image.src = objectURL;
+        this.manager.itemStart(url);
+      } else {
+        // Load from network and cache
+        const loader = new THREE.FileLoader(this.manager);
+        loader.setResponseType('arraybuffer');
+        loader.load(url, 
+          (data) => {
+            assetCache.set(url, data);
+            const blob = new Blob([data], { type: 'image/png' });
+            const objectURL = URL.createObjectURL(blob);
+            const image = new Image();
+            image.onload = () => {
+              texture.image = image;
+              texture.needsUpdate = true;
+              URL.revokeObjectURL(objectURL);
+              if (onLoad) onLoad(texture);
+            };
+            image.onerror = onError;
+            image.src = objectURL;
+          },
+          onProgress,
+          onError
+        );
+      }
+    }).catch(err => {
+      // Fallback to normal loading
+      console.warn('Cache error, loading normally:', err);
+      const image = new Image();
+      image.onload = () => {
+        texture.image = image;
+        texture.needsUpdate = true;
+        if (onLoad) onLoad(texture);
+        this.manager.itemEnd(url);
+      };
+      image.onerror = onError;
+      image.src = url;
+      this.manager.itemStart(url);
+    });
+    
+    return texture;
+  }
+}
+
 // Load ground texture for overlay
-const textureLoader = new THREE.TextureLoader(loadingManager);
+const textureLoader = new CachedTextureLoader(loadingManager);
 const groundTexture = textureLoader.load('./assets/groundtexture.png');
 groundTexture.wrapS = THREE.RepeatWrapping;
 groundTexture.wrapT = THREE.RepeatWrapping;
@@ -434,7 +587,47 @@ let currentAction = null;
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
 
-const audioLoader = new THREE.AudioLoader();
+// Create cached audio loader
+class CachedAudioLoader extends THREE.AudioLoader {
+  load(url, onLoad, onProgress, onError) {
+    assetCache.get(url).then(cachedData => {
+      if (cachedData) {
+        // Load from cache
+        const audioContext = this.manager.resolveURL ? this.manager.resolveURL(url) : url;
+        const context = THREE.AudioContext.getContext();
+        context.decodeAudioData(cachedData, 
+          (buffer) => {
+            if (onLoad) onLoad(buffer);
+          },
+          onError
+        );
+      } else {
+        // Load from network and cache
+        const loader = new THREE.FileLoader(this.manager);
+        loader.setResponseType('arraybuffer');
+        loader.load(url,
+          (data) => {
+            assetCache.set(url, data);
+            const context = THREE.AudioContext.getContext();
+            context.decodeAudioData(data,
+              (buffer) => {
+                if (onLoad) onLoad(buffer);
+              },
+              onError
+            );
+          },
+          onProgress,
+          onError
+        );
+      }
+    }).catch(err => {
+      // Fallback to normal loading
+      super.load(url, onLoad, onProgress, onError);
+    });
+  }
+}
+
+const audioLoader = new CachedAudioLoader();
 
 const themeSound = new THREE.PositionalAudio(audioListener);
 
@@ -495,7 +688,52 @@ audioLoader.load('./assets/BorisJohnson.mp3', (buffer) => {
   borisSound.setMaxDistance(20); // Maximum distance the sound can be heard
 });
 
-const loader = new GLTFLoader();
+// Create cached GLTF loader
+class CachedGLTFLoader extends GLTFLoader {
+  load(url, onLoad, onProgress, onError) {
+    assetCache.get(url).then(cachedData => {
+      if (cachedData) {
+        // Load from cache
+        const blob = new Blob([cachedData], { type: 'model/gltf-binary' });
+        const objectURL = URL.createObjectURL(blob);
+        super.load(objectURL,
+          (gltf) => {
+            URL.revokeObjectURL(objectURL);
+            if (onLoad) onLoad(gltf);
+          },
+          onProgress,
+          onError
+        );
+      } else {
+        // Load from network and cache
+        const fileLoader = new THREE.FileLoader(this.manager);
+        fileLoader.setResponseType('arraybuffer');
+        fileLoader.load(url,
+          (data) => {
+            assetCache.set(url, data);
+            const blob = new Blob([data], { type: 'model/gltf-binary' });
+            const objectURL = URL.createObjectURL(blob);
+            super.load(objectURL,
+              (gltf) => {
+                URL.revokeObjectURL(objectURL);
+                if (onLoad) onLoad(gltf);
+              },
+              onProgress,
+              onError
+            );
+          },
+          onProgress,
+          onError
+        );
+      }
+    }).catch(err => {
+      // Fallback to normal loading
+      super.load(url, onLoad, onProgress, onError);
+    });
+  }
+}
+
+const loader = new CachedGLTFLoader();
 
 // Load the character model and animations
 Promise.all([
