@@ -15,6 +15,7 @@ const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
 const MIKKEL_APP = "https://appeared-dean-accordance-shelf.trycloudflare.com"
 const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
 const wireframeDebug = false;
+const ANTI_FLICKER_HEIGHT = 0.15; // Height offset to reduce z-fighting flickering
 
 let ocamlMixers = [];
 let ocamlsMeshes = [];
@@ -35,7 +36,11 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const container = document.getElementById('canvas-container');
 
 // Renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ 
+  antialias: true, 
+  alpha: true,
+  logarithmicDepthBuffer: true // Better depth precision for large scenes, reduces flickering
+});
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -109,25 +114,25 @@ for (let i = 0; i < vertices.length; i += 3) {
     const maxEffective = Math.max(1e-6, maxDistanceFromCenter - flatZoneRadius);
     const normalized = Math.min(1, Math.max(0, (distanceFromCenter - flatZoneRadius) / maxEffective));
 
-    // Use an exponent > 1 so hills grow toward the edges (not toward the center)
-    const edgeFactor = Math.pow(normalized, 0.3);
+    // Use a steeper exponential curve for faster mountain rise
+    const edgeFactor = Math.pow(normalized, 1.8); // Increased from 0.3 to 1.8 for steeper rise
 
-    // Rolling hills base (same frequencies as before)
+    // Rolling hills base with more variation
     const baseHeight =
       Math.sin(x * 0.06) * 3 +
       Math.cos(z * 0.04) * 3 +
       Math.sin(x * 0.03) * 1.5 +
       Math.cos(z * 0.03) * 1.5;
 
-    // Modulate amplitude by edgeFactor so terrain is low near the venue and larger toward edges
-    const amplitude = 1 + edgeFactor * 6; // amplitude grows from ~1 to ~7 toward edges
+    // Much more aggressive amplitude scaling for dramatic mountains
+    const amplitude = 1 + edgeFactor * 15; // Increased from 6 to 15 for larger mountains
     height = 7.45 + baseHeight * amplitude;
 
-    // Add a smooth uplift toward the very edge so outer rim becomes mountainous
-    height += edgeFactor * 8;
+    // Add dramatic uplift toward edges - mountains rise much faster
+    height += Math.pow(edgeFactor, 2) * 40; // Quadratic growth with higher multiplier (was 8, now 40)
 
-    // Clamp height to avoid extreme spikes
-    height = Math.max(-50, Math.min(80, height));
+    // Allow much taller mountains
+    height = Math.max(-50, Math.min(200, height)); // Increased max from 80 to 200
   }
   
   vertices[i + 2] = height; // Set the Y (up) coordinate
@@ -141,27 +146,57 @@ for (let i = 0; i < vertices.length; i += 3) {
 terrainGeo.attributes.position.needsUpdate = true;
 terrainGeo.computeVertexNormals(); // Recalculate normals for proper lighting
 
-// Add vertex colors for snow effect based on height
+// Add vertex colors for terrain based on height (sand, grass, snow)
 const colors = [];
+const SAND_MIN = -10; // Sand starts at -10
+const SAND_MAX = 1; // Sand ends at 1
+const SAND_TRANSITION = 2; // Transition range for blending sand to grass
 const SNOW_HEIGHT = 30; // Height where snow starts appearing
 const SNOW_TRANSITION = 10; // Transition range for blending
 
 for (let i = 0; i < vertices.length; i += 3) {
   const y = vertices[i + 2]; // Height value
   
-  // Calculate snow factor (0 = no snow, 1 = full snow)
-  let snowFactor = 0;
-  if (y > SNOW_HEIGHT) {
-    snowFactor = Math.min(1, (y - SNOW_HEIGHT) / SNOW_TRANSITION);
+  // Define colors
+  const sandColor = { r: 0xc2 / 255, g: 0xb2 / 255, b: 0x80 / 255 }; // Sandy beige
+  const grassColor = { r: 0x55 / 255, g: 0x6b / 255, b: 0x2f / 255 }; // Dark olive green
+  const snowColor = { r: 1, g: 1, b: 1 }; // White
+  
+  let r, g, b;
+  
+  if (y < SAND_MIN) {
+    // Below sand zone - use sand color
+    r = sandColor.r;
+    g = sandColor.g;
+    b = sandColor.b;
+  } else if (y < SAND_MAX) {
+    // Sand zone
+    r = sandColor.r;
+    g = sandColor.g;
+    b = sandColor.b;
+  } else if (y < SAND_MAX + SAND_TRANSITION) {
+    // Transition from sand to grass
+    const transitionFactor = (y - SAND_MAX) / SAND_TRANSITION;
+    r = sandColor.r * (1 - transitionFactor) + grassColor.r * transitionFactor;
+    g = sandColor.g * (1 - transitionFactor) + grassColor.g * transitionFactor;
+    b = sandColor.b * (1 - transitionFactor) + grassColor.b * transitionFactor;
+  } else if (y < SNOW_HEIGHT) {
+    // Grass zone
+    r = grassColor.r;
+    g = grassColor.g;
+    b = grassColor.b;
+  } else if (y < SNOW_HEIGHT + SNOW_TRANSITION) {
+    // Transition from grass to snow
+    const snowFactor = (y - SNOW_HEIGHT) / SNOW_TRANSITION;
+    r = grassColor.r * (1 - snowFactor) + snowColor.r * snowFactor;
+    g = grassColor.g * (1 - snowFactor) + snowColor.g * snowFactor;
+    b = grassColor.b * (1 - snowFactor) + snowColor.b * snowFactor;
+  } else {
+    // Snow zone
+    r = snowColor.r;
+    g = snowColor.g;
+    b = snowColor.b;
   }
-  
-  // Blend between grass color (dark olive green) and snow color (white)
-  const grassColor = { r: 0x55 / 255, g: 0x6b / 255, b: 0x2f / 255 };
-  const snowColor = { r: 1, g: 1, b: 1 };
-  
-  const r = grassColor.r * (1 - snowFactor) + snowColor.r * snowFactor;
-  const g = grassColor.g * (1 - snowFactor) + snowColor.g * snowFactor;
-  const b = grassColor.b * (1 - snowFactor) + snowColor.b * snowFactor;
   
   colors.push(r, g, b);
 }
@@ -203,7 +238,7 @@ const terrainMat = new THREE.MeshStandardMaterial({
 });
 const terrain = new THREE.Mesh(terrainGeo2, terrainMat);
 terrain.rotation.x = -Math.PI / 2;
-terrain.position.y = 0.05; // Increased separation to reduce z-fighting flickering
+terrain.position.y = ANTI_FLICKER_HEIGHT; // Increased separation to reduce z-fighting on distant mountains
 scene.add(terrain);
 
 // Water level constant
@@ -445,7 +480,7 @@ loader.load('./assets/venue.glb', (gltf) => {
   const edgeX = 0; // Near the edge at x=100
   const edgeZ = 0; // Near the edge at z=100
   
-  const venueGroundHeight = 7.54;
+  const venueGroundHeight = getTerrainHeight(edgeX, edgeZ)+ANTI_FLICKER_HEIGHT+0.05; // Slightly above terrain to avoid z-fighting
   venueModel.position.set(edgeX, venueGroundHeight, edgeZ);
   
   // Build BVH for all castle meshes and collect them

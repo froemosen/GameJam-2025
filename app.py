@@ -19,6 +19,10 @@ def send_assets(path):
 def health():
     return {'status': 'healthy'}, 200
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory('assets', 'favicon.ico')
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5500))
     app.run(host='0.0.0.0', port=port, debug=True)
