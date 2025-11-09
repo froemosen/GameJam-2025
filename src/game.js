@@ -15,7 +15,7 @@ const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
 const MIKKEL_APP = "https://appeared-dean-accordance-shelf.trycloudflare.com"
 const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
 const wireframeDebug = false;
-const ANTI_FLICKER_HEIGHT = 0.15; // Height offset to reduce z-fighting flickering
+const ANTI_FLICKER_HEIGHT = 0.01; // Height offset to reduce z-fighting flickering
 
 let ocamlMixers = [];
 let ocamlsMeshes = [];
@@ -27,6 +27,39 @@ let borisPosition = new THREE.Vector3();
 let borisMixer = null;
 let borisAction = null;
 
+// Loading manager for tracking asset loading
+const loadingScreen = document.getElementById('loading-screen');
+const loadingBar = document.getElementById('loading-bar');
+const loadingText = document.getElementById('loading-text');
+
+const loadingManager = new THREE.LoadingManager();
+
+loadingManager.onStart = function(url, itemsLoaded, itemsTotal) {
+  console.log('Started loading: ' + url);
+};
+
+loadingManager.onProgress = function(url, itemsLoaded, itemsTotal) {
+  const progress = (itemsLoaded / itemsTotal) * 100;
+  loadingBar.style.width = progress + '%';
+  loadingText.textContent = Math.round(progress) + '%';
+  console.log('Loading: ' + Math.round(progress) + '%');
+};
+
+loadingManager.onLoad = function() {
+  console.log('All assets loaded!');
+  // Fade out loading screen after a short delay
+  setTimeout(() => {
+    loadingScreen.classList.add('fade-out');
+    // Remove from DOM after fade completes
+    setTimeout(() => {
+      loadingScreen.style.display = 'none';
+    }, 500);
+  }, 500);
+};
+
+loadingManager.onError = function(url) {
+  console.error('Error loading: ' + url);
+};
 
 // Add BVH functions to THREE.BufferGeometry
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -35,16 +68,19 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const container = document.getElementById('canvas-container');
 
-// Renderer
+// Renderer with aggressive optimization
 const renderer = new THREE.WebGLRenderer({ 
-  antialias: true, 
-  alpha: true,
-  logarithmicDepthBuffer: true // Better depth precision for large scenes, reduces flickering
+  antialias: window.devicePixelRatio <= 1, // Only antialias on low DPI screens
+  alpha: false, // Disable alpha for performance
+  logarithmicDepthBuffer: true,
+  powerPreference: "high-performance", // Use high-performance GPU
+  stencil: false // Disable stencil buffer
 });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap at 2x for performance
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows
+renderer.shadowMap.type = THREE.PCFShadowMap; // Faster than PCFSoftShadowMap
+renderer.shadowMap.autoUpdate = true; // Keep shadows updating for animated characters
 container.appendChild(renderer.domElement);
 
 // CSS3D Renderer for iframe
@@ -55,10 +91,11 @@ cssRenderer.domElement.style.top = '0';
 cssRenderer.domElement.style.pointerEvents = 'none'; // Let pointer lock work
 container.appendChild(cssRenderer.domElement);
 
-// Scene & Camera
+// Scene & Camera with fog for distant culling
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+scene.fog = new THREE.Fog(0x87ceeb, 400, 800); // Add fog to hide distant LOD switches
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 850); // Reduced far plane
 
 // Lighting
 const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
@@ -67,75 +104,101 @@ scene.add(hemi);
 const dir = new THREE.DirectionalLight(0xffffff, 0.8);
 dir.position.set(5, 10, 7.5);
 dir.castShadow = true;
-// Configure shadow properties
-dir.shadow.mapSize.width = 2048;
+// Configure shadow properties - balanced quality and performance
+dir.shadow.mapSize.width = 2048; // Higher resolution for better quality
 dir.shadow.mapSize.height = 2048;
 dir.shadow.camera.near = 0.5;
-dir.shadow.camera.far = 50;
-dir.shadow.camera.left = -20;
-dir.shadow.camera.right = 20;
-dir.shadow.camera.top = 20;
-dir.shadow.camera.bottom = -20;
+dir.shadow.camera.far = 100;
+dir.shadow.camera.left = -50;
+dir.shadow.camera.right = 50;
+dir.shadow.camera.top = 50;
+dir.shadow.camera.bottom = -50;
+dir.shadow.bias = -0.0001; // Prevent shadow acne
+dir.shadow.radius = 2; // Slight blur to hide pixelation
 scene.add(dir);
 
-// Random Terrain Generation
+// Random Terrain Generation with LOD (Level of Detail)
 const terrainSize = 1000;
-const terrainSegments = 400; // Reduced from 100 for less detail and better collision
-const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
 
-// Generate random heights for terrain
-const vertices = terrainGeo.attributes.position.array;
-const heightMap = []; // Store heights for collision detection
+// Function to generate terrain geometry at different detail levels
+function generateTerrainGeometry(segments) {
+  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
+  const vertices = terrainGeo.attributes.position.array;
+  const segmentSize = terrainSize / segments;
+  const maxDistanceFromCenter = Math.sqrt((terrainSize/2) * (terrainSize/2) * 2);
+  
+  for (let i = 0; i < vertices.length; i += 3) {
+    const x = vertices[i];
+    const z = vertices[i + 1];
+    
+    // Calculate distance from center (0, 0) where the venue is
+    const distanceFromCenter = Math.sqrt(x * x + z * z);
+    
+    // Define flat zone radius around venue (completely flat)
+    const flatZoneRadius = 120;
+    
+    let height;
+    
+    if (distanceFromCenter < flatZoneRadius) {
+      height = 7.45;
+    } else {
+      const maxEffective = Math.max(1e-6, maxDistanceFromCenter - flatZoneRadius);
+      const normalized = Math.min(1, Math.max(0, (distanceFromCenter - flatZoneRadius) / maxEffective));
+      const edgeFactor = Math.pow(normalized, 1.8);
+      
+      const baseHeight =
+        Math.sin(x * 0.06) * 3 +
+        Math.cos(z * 0.04) * 3 +
+        Math.sin(x * 0.03) * 1.5 +
+        Math.cos(z * 0.03) * 1.5;
+      
+      const amplitude = 1 + edgeFactor * 15;
+      let computedHeight = 7.45 + baseHeight * amplitude;
+      computedHeight += Math.pow(edgeFactor, 2) * 40;
+      computedHeight = Math.max(-50, Math.min(200, computedHeight));
+      
+      const blendDistance = 8;
+      if (distanceFromCenter <= flatZoneRadius + blendDistance) {
+        const t = Math.max(0, (distanceFromCenter - flatZoneRadius) / blendDistance);
+        const s = t * t * (3 - 2 * t);
+        height = 7.45 * (1 - s) + computedHeight * s;
+      } else {
+        height = computedHeight;
+      }
+    }
+    
+    vertices[i + 2] = height;
+  }
+  
+  terrainGeo.attributes.position.needsUpdate = true;
+  terrainGeo.computeVertexNormals();
+  
+  return terrainGeo;
+}
+
+// Generate LOD levels with more aggressive optimization
+const terrainGeoHigh = generateTerrainGeometry(200);   // Reduced from 300 to 200
+const terrainGeoMedium = generateTerrainGeometry(80);  // Reduced from 150 to 80
+const terrainGeoLow = generateTerrainGeometry(30);     // Reduced from 75 to 30
+const terrainGeoVeryLow = generateTerrainGeometry(15); // Extra low detail for very far terrain
+
+// Store heightmap from highest detail version for collision detection
+const terrainSegments = 200; // Match the high detail level
+const vertices = terrainGeoHigh.attributes.position.array;
+const heightMap = [];
 const segmentSize = terrainSize / terrainSegments;
-const maxDistanceFromCenter = Math.sqrt((terrainSize/2) * (terrainSize/2) * 2); // Diagonal distance
+const maxDistanceFromCenter = Math.sqrt((terrainSize/2) * (terrainSize/2) * 2);
 
 // Initialize heightMap
 for (let i = 0; i <= terrainSegments; i++) {
   heightMap[i] = [];
 }
 
+// Populate heightMap from high detail geometry for collision detection
 for (let i = 0; i < vertices.length; i += 3) {
   const x = vertices[i];
   const z = vertices[i + 1];
-  
-  // Calculate distance from center (0, 0) where the venue is
-  const distanceFromCenter = Math.sqrt(x * x + z * z);
-  
-  // Define flat zone radius around venue (completely flat)
-  const flatZoneRadius = 120; // 120 units flat around center
-  
-  let height;
-  
-  if (distanceFromCenter < flatZoneRadius) {
-    // Completely flat around the venue at elevated height
-    height = 7.45; // Raised ground level
-  } else {
-    // Ensure we normalize distance from flat zone to edge (0..1)
-    const maxEffective = Math.max(1e-6, maxDistanceFromCenter - flatZoneRadius);
-    const normalized = Math.min(1, Math.max(0, (distanceFromCenter - flatZoneRadius) / maxEffective));
-
-    // Use a steeper exponential curve for faster mountain rise
-    const edgeFactor = Math.pow(normalized, 1.8); // Increased from 0.3 to 1.8 for steeper rise
-
-    // Rolling hills base with more variation
-    const baseHeight =
-      Math.sin(x * 0.06) * 3 +
-      Math.cos(z * 0.04) * 3 +
-      Math.sin(x * 0.03) * 1.5 +
-      Math.cos(z * 0.03) * 1.5;
-
-    // Much more aggressive amplitude scaling for dramatic mountains
-    const amplitude = 1 + edgeFactor * 15; // Increased from 6 to 15 for larger mountains
-    height = 7.45 + baseHeight * amplitude;
-
-    // Add dramatic uplift toward edges - mountains rise much faster
-    height += Math.pow(edgeFactor, 2) * 40; // Quadratic growth with higher multiplier (was 8, now 40)
-
-    // Allow much taller mountains
-    height = Math.max(-50, Math.min(200, height)); // Increased max from 80 to 200
-  }
-  
-  vertices[i + 2] = height; // Set the Y (up) coordinate
+  const height = vertices[i + 2];
   
   // Store in heightMap for lookup
   const gridX = Math.round((x + terrainSize / 2) / segmentSize);
@@ -143,103 +206,142 @@ for (let i = 0; i < vertices.length; i += 3) {
   heightMap[gridX][gridZ] = height;
 }
 
-terrainGeo.attributes.position.needsUpdate = true;
-terrainGeo.computeVertexNormals(); // Recalculate normals for proper lighting
-
-// Add vertex colors for terrain based on height (sand, grass, snow)
-const colors = [];
-const SAND_MIN = -10; // Sand starts at -10
-const SAND_MAX = 1; // Sand ends at 1
-const SAND_TRANSITION = 2; // Transition range for blending sand to grass
-const SNOW_HEIGHT = 30; // Height where snow starts appearing
-const SNOW_TRANSITION = 10; // Transition range for blending
-
-for (let i = 0; i < vertices.length; i += 3) {
-  const y = vertices[i + 2]; // Height value
+// Function to add vertex colors based on height (sand, grass, snow)
+function applyTerrainColors(terrainGeo) {
+  const colors = [];
+  const vertices = terrainGeo.attributes.position.array;
+  const SAND_MIN = -10;
+  const SAND_MAX = 1;
+  const SAND_TRANSITION = 2;
+  const SNOW_HEIGHT = 30;
+  const SNOW_TRANSITION = 10;
   
-  // Define colors
-  const sandColor = { r: 0xc2 / 255, g: 0xb2 / 255, b: 0x80 / 255 }; // Sandy beige
-  const grassColor = { r: 0x55 / 255, g: 0x6b / 255, b: 0x2f / 255 }; // Dark olive green
-  const snowColor = { r: 1, g: 1, b: 1 }; // White
-  
-  let r, g, b;
-  
-  if (y < SAND_MIN) {
-    // Below sand zone - use sand color
-    r = sandColor.r;
-    g = sandColor.g;
-    b = sandColor.b;
-  } else if (y < SAND_MAX) {
-    // Sand zone
-    r = sandColor.r;
-    g = sandColor.g;
-    b = sandColor.b;
-  } else if (y < SAND_MAX + SAND_TRANSITION) {
-    // Transition from sand to grass
-    const transitionFactor = (y - SAND_MAX) / SAND_TRANSITION;
-    r = sandColor.r * (1 - transitionFactor) + grassColor.r * transitionFactor;
-    g = sandColor.g * (1 - transitionFactor) + grassColor.g * transitionFactor;
-    b = sandColor.b * (1 - transitionFactor) + grassColor.b * transitionFactor;
-  } else if (y < SNOW_HEIGHT) {
-    // Grass zone
-    r = grassColor.r;
-    g = grassColor.g;
-    b = grassColor.b;
-  } else if (y < SNOW_HEIGHT + SNOW_TRANSITION) {
-    // Transition from grass to snow
-    const snowFactor = (y - SNOW_HEIGHT) / SNOW_TRANSITION;
-    r = grassColor.r * (1 - snowFactor) + snowColor.r * snowFactor;
-    g = grassColor.g * (1 - snowFactor) + snowColor.g * snowFactor;
-    b = grassColor.b * (1 - snowFactor) + snowColor.b * snowFactor;
-  } else {
-    // Snow zone
-    r = snowColor.r;
-    g = snowColor.g;
-    b = snowColor.b;
+  for (let i = 0; i < vertices.length; i += 3) {
+    const y = vertices[i + 2];
+    
+    const sandColor = { r: 0xc2 / 255, g: 0xb2 / 255, b: 0x80 / 255 };
+    const grassColor = { r: 0x55 / 255, g: 0x6b / 255, b: 0x2f / 255 };
+    const snowColor = { r: 1, g: 1, b: 1 };
+    
+    let r, g, b;
+    
+    if (y < SAND_MIN) {
+      r = sandColor.r; g = sandColor.g; b = sandColor.b;
+    } else if (y < SAND_MAX) {
+      r = sandColor.r; g = sandColor.g; b = sandColor.b;
+    } else if (y < SAND_MAX + SAND_TRANSITION) {
+      const transitionFactor = (y - SAND_MAX) / SAND_TRANSITION;
+      r = sandColor.r * (1 - transitionFactor) + grassColor.r * transitionFactor;
+      g = sandColor.g * (1 - transitionFactor) + grassColor.g * transitionFactor;
+      b = sandColor.b * (1 - transitionFactor) + grassColor.b * transitionFactor;
+    } else if (y < SNOW_HEIGHT) {
+      r = grassColor.r; g = grassColor.g; b = grassColor.b;
+    } else if (y < SNOW_HEIGHT + SNOW_TRANSITION) {
+      const snowFactor = (y - SNOW_HEIGHT) / SNOW_TRANSITION;
+      r = grassColor.r * (1 - snowFactor) + snowColor.r * snowFactor;
+      g = grassColor.g * (1 - snowFactor) + snowColor.g * snowFactor;
+      b = grassColor.b * (1 - snowFactor) + snowColor.b * snowFactor;
+    } else {
+      r = snowColor.r; g = snowColor.g; b = snowColor.b;
+    }
+    
+    colors.push(r, g, b);
   }
   
-  colors.push(r, g, b);
+  terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 }
 
-terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+// Apply colors to all LOD levels
+applyTerrainColors(terrainGeoHigh);
+applyTerrainColors(terrainGeoMedium);
+applyTerrainColors(terrainGeoLow);
+applyTerrainColors(terrainGeoVeryLow);
 
-// Create solid base terrain with vertex colors
+// Create material for terrain with optimization
 const baseTerrainMat = new THREE.MeshStandardMaterial({ 
   vertexColors: true,
   flatShading: false,
-  side: THREE.DoubleSide
+  side: THREE.FrontSide // Only render front side for performance
 });
-const baseTerrain = new THREE.Mesh(terrainGeo, baseTerrainMat);
-baseTerrain.rotation.x = -Math.PI / 2;
-baseTerrain.receiveShadow = true;
-baseTerrain.castShadow = true;
-scene.add(baseTerrain);
+
+// Create LOD system for base terrain
+const terrainLOD = new THREE.LOD();
+
+const baseTerrainHigh = new THREE.Mesh(terrainGeoHigh, baseTerrainMat);
+baseTerrainHigh.rotation.x = -Math.PI / 2;
+baseTerrainHigh.receiveShadow = true;
+baseTerrainHigh.castShadow = true;
+
+const baseTerrainMedium = new THREE.Mesh(terrainGeoMedium, baseTerrainMat);
+baseTerrainMedium.rotation.x = -Math.PI / 2;
+baseTerrainMedium.receiveShadow = true;
+baseTerrainMedium.castShadow = true;
+
+const baseTerrainLow = new THREE.Mesh(terrainGeoLow, baseTerrainMat);
+baseTerrainLow.rotation.x = -Math.PI / 2;
+baseTerrainLow.receiveShadow = true;
+baseTerrainLow.castShadow = false; // Disable shadows for far terrain
+
+const baseTerrainVeryLow = new THREE.Mesh(terrainGeoVeryLow, baseTerrainMat);
+baseTerrainVeryLow.rotation.x = -Math.PI / 2;
+baseTerrainVeryLow.receiveShadow = false; // No shadows for very far terrain
+baseTerrainVeryLow.castShadow = false;
+
+// Add LOD levels: more aggressive distance-based switching
+terrainLOD.addLevel(baseTerrainHigh, 0);     // 0-150 units: high detail
+terrainLOD.addLevel(baseTerrainMedium, 150); // 150-300 units: medium detail
+terrainLOD.addLevel(baseTerrainLow, 300);    // 300-500 units: low detail
+terrainLOD.addLevel(baseTerrainVeryLow, 500); // 500+ units: very low detail
+
+scene.add(terrainLOD);
 
 // Load ground texture for overlay
-const textureLoader = new THREE.TextureLoader();
+const textureLoader = new THREE.TextureLoader(loadingManager);
 const groundTexture = textureLoader.load('./assets/groundtexture.png');
 groundTexture.wrapS = THREE.RepeatWrapping;
 groundTexture.wrapT = THREE.RepeatWrapping;
-groundTexture.repeat.set(100, 100); // Repeat texture across terrain for better tiling on larger map
+groundTexture.repeat.set(75, 75); // Repeat texture across terrain for better tiling on larger map
 groundTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Reduce flickering at distance
 groundTexture.minFilter = THREE.LinearMipmapLinearFilter; // Better filtering for distant terrain
 groundTexture.magFilter = THREE.LinearFilter;
 
 // Create semi-transparent textured layer on top (grass texture with vertex colors for snow)
-const terrainGeo2 = terrainGeo.clone();
-const terrainMat = new THREE.MeshStandardMaterial({ 
+// Use LOD for textured layer too with aggressive optimization
+const terrainTextureMat = new THREE.MeshStandardMaterial({ 
   map: groundTexture,
-  vertexColors: true, // Enable vertex colors to blend with texture
+  vertexColors: true,
   transparent: true,
-  opacity: 0.6, // Make texture semi-transparent
+  opacity: 0.6,
   flatShading: false,
-  side: THREE.DoubleSide,
-  depthWrite: false // Prevent z-fighting with base layer
+  side: THREE.FrontSide, // Front side only for performance
+  depthWrite: false
 });
-const terrain = new THREE.Mesh(terrainGeo2, terrainMat);
-terrain.rotation.x = -Math.PI / 2;
-terrain.position.y = ANTI_FLICKER_HEIGHT; // Increased separation to reduce z-fighting on distant mountains
-scene.add(terrain);
+
+const terrainTextureLOD = new THREE.LOD();
+
+const terrainHigh = new THREE.Mesh(terrainGeoHigh.clone(), terrainTextureMat);
+terrainHigh.rotation.x = -Math.PI / 2;
+terrainHigh.position.y = ANTI_FLICKER_HEIGHT;
+
+const terrainMedium = new THREE.Mesh(terrainGeoMedium.clone(), terrainTextureMat);
+terrainMedium.rotation.x = -Math.PI / 2;
+terrainMedium.position.y = ANTI_FLICKER_HEIGHT;
+
+const terrainLow = new THREE.Mesh(terrainGeoLow.clone(), terrainTextureMat);
+terrainLow.rotation.x = -Math.PI / 2;
+terrainLow.position.y = ANTI_FLICKER_HEIGHT;
+
+const terrainVeryLow = new THREE.Mesh(terrainGeoVeryLow.clone(), terrainTextureMat);
+terrainVeryLow.rotation.x = -Math.PI / 2;
+terrainVeryLow.position.y = ANTI_FLICKER_HEIGHT;
+
+// Match base terrain LOD distances
+terrainTextureLOD.addLevel(terrainHigh, 0);
+terrainTextureLOD.addLevel(terrainMedium, 150);
+terrainTextureLOD.addLevel(terrainLow, 300);
+terrainTextureLOD.addLevel(terrainVeryLow, 500);
+
+scene.add(terrainTextureLOD);
 
 // Water level constant
 const WATER_LEVEL = 0;
@@ -346,7 +448,7 @@ const jumpingSound = new THREE.Audio(audioListener);
 audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
   themeSound.setBuffer(buffer);
   themeSound.setLoop(true);
-  themeSound.setVolume(0.4);
+  themeSound.setVolume(0.02);
 });
 
 
@@ -354,28 +456,28 @@ audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
 audioLoader.load('./assets/walking_elephant.m4a', (buffer) => {
   walkingSound.setBuffer(buffer);
   walkingSound.setLoop(true);
-  walkingSound.setVolume(0.5);
+  walkingSound.setVolume(1);
   walkingSound.playbackRate = 1.15;
 });
 
 audioLoader.load('/assets/running_elephant.m4a', (buffer) => {
   runningSound.setBuffer(buffer);
   runningSound.setLoop(true);
-  runningSound.setVolume(0.5);
+  runningSound.setVolume(1);
   runningSound.playbackRate = 1.25;
 });
 
 audioLoader.load('./assets/swimming_elephant.m4a', (buffer) => {
   swimmingSound.setBuffer(buffer);
   swimmingSound.setLoop(true);
-  swimmingSound.setVolume(0.5);
+  swimmingSound.setVolume(1);
   swimmingSound.playbackRate = 1.5;
 });
 
 audioLoader.load('./assets/jumping_elephant.wav', (buffer) => {
   jumpingSound.setBuffer(buffer);
   jumpingSound.setLoop(false);
-  jumpingSound.setVolume(0.05);
+  jumpingSound.setVolume(0.1);
   jumpingSound.playbackRate = 2;
 });
 
@@ -617,6 +719,60 @@ makeOcaml(6.5, 8.2, 18.2, 6);
 makeOcaml(-2.9, 8.2, 18.2, 6);
 makeOcaml(-2.9, 7.45, 100, 30);
 
+// Function to optimize model materials and rendering (no geometry decimation)
+function optimizeModel(model) {
+  let totalVertices = 0;
+  let meshCount = 0;
+  
+  model.traverse((node) => {
+    if (node.isMesh) {
+      meshCount++;
+      
+      // Count vertices before optimization
+      if (node.geometry.attributes.position) {
+        totalVertices += node.geometry.attributes.position.count;
+      }
+      
+      // Optimize material for performance without breaking shadows or textures
+      if (node.material) {
+        // Clone material to avoid affecting other instances
+        node.material = node.material.clone();
+        
+        // Optimize material settings for performance
+        node.material.flatShading = false;
+        
+        // Disable features that aren't needed for better performance
+        if (node.material.map) {
+          // Ensure texture is using mipmaps efficiently
+          node.material.map.generateMipmaps = true;
+        }
+        
+        // Keep shadows working properly
+        node.material.shadowSide = THREE.FrontSide;
+        
+        // Force material to update
+        node.material.needsUpdate = true;
+      }
+      
+      // Optimize geometry without changing topology
+      const geometry = node.geometry;
+      if (geometry) {
+        // Ensure normals are computed for proper shading
+        if (!geometry.attributes.normal) {
+          geometry.computeVertexNormals();
+        }
+        
+        // Remove unused attributes to save memory
+        if (geometry.attributes.tangent) {
+          delete geometry.attributes.tangent;
+        }
+      }
+    }
+  });
+  
+  console.log(`Optimized model: ${meshCount} meshes, ${totalVertices} vertices total`);
+}
+
 // Load Boris Johnson inside the venue
 loader.load('./assets/boris.glb', (borisGltf) => {
   borisModel = borisGltf.scene;
@@ -636,6 +792,9 @@ loader.load('./assets/boris.glb', (borisGltf) => {
   // Rotate Boris to face towards the entrance
   borisModel.rotation.x = Math.PI / 2; // Facing negative Z direction
   borisModel.rotation.z = Math.PI - 0.07; // Adjust as needed
+  
+  // Optimize model for performance (materials and memory)
+  optimizeModel(borisModel);
   
   // Enable shadows
   borisModel.traverse((node) => {
@@ -910,16 +1069,18 @@ document.addEventListener('click', (event) => {
 // Track pointer lock state
 document.addEventListener('pointerlockchange', () => {
   isPointerLocked = document.pointerLockElement === renderer.domElement;
+  
+  // Start theme music on first pointer lock (user interaction)
+  if (isPointerLocked && themeSound.buffer && !themeSound.isPlaying) {
+    themeSound.play();
+    console.log('Theme music started!');
+  }
+  
   if (!isPointerLocked && isCinemaMode) {
     // Exited pointer lock while in cinema mode - exit cinema mode
     isCinemaMode = false;
     cssRenderer.domElement.style.pointerEvents = 'none';
-    const indicator = document.getElementById('cinema-mode-indicator');
-    if (indicator) indicator.style.display = 'none';
   }
-});
-document.addEventListener('pointerlockchange', () => {
-  isPointerLocked = document.pointerLockElement === renderer.domElement;
 });
 
 // Mouse movement for camera rotation
@@ -984,15 +1145,11 @@ function onKeyDown(e) {
         }
         isCinemaMode = true;
         cssRenderer.domElement.style.pointerEvents = 'auto';
-        const indicator = document.getElementById('cinema-mode-indicator');
-        if (indicator) indicator.style.display = 'block';
         console.log('Cinema mode enabled - cursor active');
       } else {
         // Re-lock pointer and disable cinema interaction
         isCinemaMode = false;
         cssRenderer.domElement.style.pointerEvents = 'none';
-        const indicator = document.getElementById('cinema-mode-indicator');
-        if (indicator) indicator.style.display = 'none';
         renderer.domElement.requestPointerLock();
         console.log('Cinema mode disabled - pointer locked');
       }
@@ -1164,6 +1321,10 @@ let desiredCamPos = null
 function animate() {
   requestAnimationFrame(animate);
   const delta = Math.min(0.05, clock.getDelta());
+
+  // Update LOD based on camera position
+  terrainLOD.update(camera);
+  terrainTextureLOD.update(camera);
 
   // Update animation mixers
   if (mixer) {
@@ -1465,8 +1626,7 @@ camera.position.set(
 );
 camera.lookAt(character.position);
 
-// Start
-themeSound.play();
+// Start animation loop (theme music will start on first user click)
 animate();
 
 
@@ -1486,6 +1646,9 @@ function makeOcaml(x, y, z, size) {
 
       // Rotate him 180 degrees to face the camera
       ocamlModel.rotation.y = Math.PI;  
+      
+      // Optimize model for performance (materials and memory)
+      optimizeModel(ocamlModel);
       
       // Build BVH for OCaml meshes and enable shadows
       ocamlModel.traverse((node) => {
