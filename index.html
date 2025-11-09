@@ -7,9 +7,102 @@
 			html,body{height:100%;margin:0}
 			body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
 			#canvas-container{width:100%;height:100%;display:block;overflow:hidden}
-			#overlay{position:fixed;left:12px;top:12px;color:#fff;background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:6px}
+			#overlay{position:fixed;left:12px;top:12px;color:#fff;background:rgba(0,0,0,0.35);padding:8px 12px;border-radius:6px;z-index:10}
 			#instructions{font-size:13px;line-height:1.4}
 			a { color: #9cf }
+			
+			/* Crosshair for aiming */
+			#crosshair {
+				position: fixed;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				width: 4px;
+				height: 4px;
+				background: white;
+				border-radius: 50%;
+				pointer-events: none;
+				z-index: 100;
+				box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+			}
+			
+			/* Mobile controls */
+			#mobile-controls {
+				position: fixed;
+				bottom: 0;
+				left: 0;
+				width: 100%;
+				height: 200px;
+				pointer-events: none;
+				z-index: 200;
+				display: none;
+			}
+			
+			#joystick-container {
+				position: absolute;
+				bottom: 30px;
+				left: 30px;
+				width: 120px;
+				height: 120px;
+				pointer-events: auto;
+			}
+			
+			#joystick-base {
+				width: 100%;
+				height: 100%;
+				background: rgba(255, 255, 255, 0.2);
+				border: 3px solid rgba(255, 255, 255, 0.4);
+				border-radius: 50%;
+				position: relative;
+			}
+			
+			#joystick-stick {
+				width: 50px;
+				height: 50px;
+				background: rgba(255, 255, 255, 0.6);
+				border: 2px solid rgba(255, 255, 255, 0.8);
+				border-radius: 50%;
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				transition: all 0.1s;
+			}
+			
+			#jump-button {
+				position: absolute;
+				bottom: 30px;
+				right: 30px;
+				width: 80px;
+				height: 80px;
+				background: rgba(255, 100, 100, 0.6);
+				border: 3px solid rgba(255, 255, 255, 0.6);
+				border-radius: 50%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				color: white;
+				font-size: 24px;
+				font-weight: bold;
+				pointer-events: auto;
+				user-select: none;
+				-webkit-user-select: none;
+			}
+			
+			#jump-button:active {
+				background: rgba(255, 100, 100, 0.9);
+				transform: scale(0.95);
+			}
+			
+			/* Show mobile controls on touch devices */
+			@media (hover: none) and (pointer: coarse) {
+				#mobile-controls {
+					display: block;
+				}
+				#overlay {
+					font-size: 11px;
+				}
+			}
 		</style>
 		<script type="importmap">
 			{
@@ -22,6 +115,7 @@
 	</head>
 	<body>
 		<div id="canvas-container"></div>
+		<div id="crosshair"></div>
 		<div id="overlay">
 			<div id="instructions">
 				<strong>Control Mohamed</strong>
@@ -39,6 +133,16 @@
 					Position: X: 0.0, Y: 0.0, Z: 0.0
 				</div>
 			</div>
+		</div>
+
+		<!-- Mobile Controls -->
+		<div id="mobile-controls">
+			<div id="joystick-container">
+				<div id="joystick-base">
+					<div id="joystick-stick"></div>
+				</div>
+			</div>
+			<div id="jump-button">JUMP</div>
 		</div>
 
 		<!-- Game module (uses ES modules and CDN for Three.js) -->

@@ -10,6 +10,23 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 
+const KRISTIAN_APP = "https://recruitment-dealers-ebooks-agree.trycloudflare.com/"
+const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
+const MIKKEL_APP = "https://appeared-dean-accordance-shelf.trycloudflare.com"
+const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
+const wireframeDebug = false;
+
+let ocamlMixers = [];
+let ocamlsMeshes = [];
+
+// Boris Johnson variables
+let borisModel = null;
+let borisSound = null;
+let borisPosition = new THREE.Vector3();
+let borisMixer = null;
+let borisAction = null;
+
+
 // Add BVH functions to THREE.BufferGeometry
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -57,14 +74,15 @@ dir.shadow.camera.bottom = -20;
 scene.add(dir);
 
 // Random Terrain Generation
-const terrainSize = 200;
-const terrainSegments = 40; // Reduced from 100 for less detail and better collision
+const terrainSize = 1000;
+const terrainSegments = 400; // Reduced from 100 for less detail and better collision
 const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
 
 // Generate random heights for terrain
 const vertices = terrainGeo.attributes.position.array;
 const heightMap = []; // Store heights for collision detection
 const segmentSize = terrainSize / terrainSegments;
+const maxDistanceFromCenter = Math.sqrt((terrainSize/2) * (terrainSize/2) * 2); // Diagonal distance
 
 // Initialize heightMap
 for (let i = 0; i <= terrainSegments; i++) {
@@ -75,12 +93,42 @@ for (let i = 0; i < vertices.length; i += 3) {
   const x = vertices[i];
   const z = vertices[i + 1];
   
-  // Create rolling hills with Perlin-like noise (simplified)
-  const height = 
-    Math.sin(x * 0.05) * 3 +
-    Math.cos(z * 0.05) * 3 +
-    Math.sin(x * 0.1) * 1.5 +
-    Math.cos(z * 0.1) * 1.5;
+  // Calculate distance from center (0, 0) where the venue is
+  const distanceFromCenter = Math.sqrt(x * x + z * z);
+  
+  // Define flat zone radius around venue (completely flat)
+  const flatZoneRadius = 120; // 120 units flat around center
+  
+  let height;
+  
+  if (distanceFromCenter < flatZoneRadius) {
+    // Completely flat around the venue at elevated height
+    height = 7.45; // Raised ground level
+  } else {
+    // Ensure we normalize distance from flat zone to edge (0..1)
+    const maxEffective = Math.max(1e-6, maxDistanceFromCenter - flatZoneRadius);
+    const normalized = Math.min(1, Math.max(0, (distanceFromCenter - flatZoneRadius) / maxEffective));
+
+    // Use an exponent > 1 so hills grow toward the edges (not toward the center)
+    const edgeFactor = Math.pow(normalized, 0.3);
+
+    // Rolling hills base (same frequencies as before)
+    const baseHeight =
+      Math.sin(x * 0.06) * 3 +
+      Math.cos(z * 0.04) * 3 +
+      Math.sin(x * 0.03) * 1.5 +
+      Math.cos(z * 0.03) * 1.5;
+
+    // Modulate amplitude by edgeFactor so terrain is low near the venue and larger toward edges
+    const amplitude = 1 + edgeFactor * 6; // amplitude grows from ~1 to ~7 toward edges
+    height = 7.45 + baseHeight * amplitude;
+
+    // Add a smooth uplift toward the very edge so outer rim becomes mountainous
+    height += edgeFactor * 8;
+
+    // Clamp height to avoid extreme spikes
+    height = Math.max(-50, Math.min(80, height));
+  }
   
   vertices[i + 2] = height; // Set the Y (up) coordinate
   
@@ -93,9 +141,36 @@ for (let i = 0; i < vertices.length; i += 3) {
 terrainGeo.attributes.position.needsUpdate = true;
 terrainGeo.computeVertexNormals(); // Recalculate normals for proper lighting
 
-// Create solid green base terrain
+// Add vertex colors for snow effect based on height
+const colors = [];
+const SNOW_HEIGHT = 30; // Height where snow starts appearing
+const SNOW_TRANSITION = 10; // Transition range for blending
+
+for (let i = 0; i < vertices.length; i += 3) {
+  const y = vertices[i + 2]; // Height value
+  
+  // Calculate snow factor (0 = no snow, 1 = full snow)
+  let snowFactor = 0;
+  if (y > SNOW_HEIGHT) {
+    snowFactor = Math.min(1, (y - SNOW_HEIGHT) / SNOW_TRANSITION);
+  }
+  
+  // Blend between grass color (dark olive green) and snow color (white)
+  const grassColor = { r: 0x55 / 255, g: 0x6b / 255, b: 0x2f / 255 };
+  const snowColor = { r: 1, g: 1, b: 1 };
+  
+  const r = grassColor.r * (1 - snowFactor) + snowColor.r * snowFactor;
+  const g = grassColor.g * (1 - snowFactor) + snowColor.g * snowFactor;
+  const b = grassColor.b * (1 - snowFactor) + snowColor.b * snowFactor;
+  
+  colors.push(r, g, b);
+}
+
+terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+// Create solid base terrain with vertex colors
 const baseTerrainMat = new THREE.MeshStandardMaterial({ 
-  color: 0x556b2f,
+  vertexColors: true,
   flatShading: false,
   side: THREE.DoubleSide
 });
@@ -110,12 +185,16 @@ const textureLoader = new THREE.TextureLoader();
 const groundTexture = textureLoader.load('./assets/groundtexture.png');
 groundTexture.wrapS = THREE.RepeatWrapping;
 groundTexture.wrapT = THREE.RepeatWrapping;
-groundTexture.repeat.set(20, 20); // Repeat texture across terrain
+groundTexture.repeat.set(100, 100); // Repeat texture across terrain for better tiling on larger map
+groundTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Reduce flickering at distance
+groundTexture.minFilter = THREE.LinearMipmapLinearFilter; // Better filtering for distant terrain
+groundTexture.magFilter = THREE.LinearFilter;
 
-// Create semi-transparent textured layer on top
+// Create semi-transparent textured layer on top (grass texture with vertex colors for snow)
 const terrainGeo2 = terrainGeo.clone();
 const terrainMat = new THREE.MeshStandardMaterial({ 
   map: groundTexture,
+  vertexColors: true, // Enable vertex colors to blend with texture
   transparent: true,
   opacity: 0.6, // Make texture semi-transparent
   flatShading: false,
@@ -124,7 +203,7 @@ const terrainMat = new THREE.MeshStandardMaterial({
 });
 const terrain = new THREE.Mesh(terrainGeo2, terrainMat);
 terrain.rotation.x = -Math.PI / 2;
-terrain.position.y = 0.01; // Slightly above base to prevent z-fighting
+terrain.position.y = 0.05; // Increased separation to reduce z-fighting flickering
 scene.add(terrain);
 
 // Water level constant
@@ -229,13 +308,13 @@ const swimmingSound = new THREE.Audio(audioListener);
 const jumpingSound = new THREE.Audio(audioListener);
 
 // Load sounds
-audioLoader.load('./assets/vimmersvej.m4a', (buffer) => {
+audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
   themeSound.setBuffer(buffer);
   themeSound.setLoop(true);
   themeSound.setVolume(0.4);
-})
+});
 
-themeSound.play();
+
 
 audioLoader.load('./assets/walking_elephant.m4a', (buffer) => {
   walkingSound.setBuffer(buffer);
@@ -263,6 +342,16 @@ audioLoader.load('./assets/jumping_elephant.wav', (buffer) => {
   jumpingSound.setLoop(false);
   jumpingSound.setVolume(0.05);
   jumpingSound.playbackRate = 2;
+});
+
+// Load Boris Johnson sound as PositionalAudio
+borisSound = new THREE.PositionalAudio(audioListener);
+audioLoader.load('./assets/BorisJohnson.mp3', (buffer) => {
+  borisSound.setBuffer(buffer);
+  borisSound.setPlaybackRate(1.1);
+  borisSound.setVolume(1.0);
+  borisSound.setRefDistance(5); // Distance at which volume starts to decrease
+  borisSound.setMaxDistance(20); // Maximum distance the sound can be heard
 });
 
 const loader = new GLTFLoader();
@@ -356,7 +445,7 @@ loader.load('./assets/venue.glb', (gltf) => {
   const edgeX = 0; // Near the edge at x=100
   const edgeZ = 0; // Near the edge at z=100
   
-  const venueGroundHeight = getTerrainHeight(edgeX, edgeZ)+3;
+  const venueGroundHeight = 7.54;
   venueModel.position.set(edgeX, venueGroundHeight, edgeZ);
   
   // Build BVH for all castle meshes and collect them
@@ -371,13 +460,8 @@ loader.load('./assets/venue.glb', (gltf) => {
       node.receiveShadow = true;
       
       // Add debug wireframe to show collision mesh
-      const wireframeGeometry = new THREE.WireframeGeometry(node.geometry);
-      const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
-      const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
-      wireframe.position.copy(node.position);
-      wireframe.rotation.copy(node.rotation);
-      wireframe.scale.copy(node.scale);
-      node.add(wireframe); // Attach to the mesh so it moves with it
+      if (wireframeDebug) addWireframeDebug(node);
+      
     }
   });
   
@@ -385,9 +469,9 @@ loader.load('./assets/venue.glb', (gltf) => {
   console.log('Venue loaded with', venueMeshes.length, 'meshes for collision');
   
   // Create a clickable screenshot inside the venue
-  const screen
-  const screenshotTexture = textureLoader.load('./assets/au-room-schedule-screenshot.png'); // Placeholder texture
-  const screenshotGeometry = new THREE.PlaneGeometry(20, ); // Screen size
+  const screenShotScale = 1.5;
+  const screenshotTexture = textureLoader.load(MIKKEL_SCREENSHOT); // Placeholder texture
+  const screenshotGeometry = new THREE.PlaneGeometry(10 * screenShotScale, 7 * screenShotScale); // Screen size
   const screenshotMaterial = new THREE.MeshStandardMaterial({ 
     map: screenshotTexture,
     side: THREE.DoubleSide,
@@ -397,130 +481,336 @@ loader.load('./assets/venue.glb', (gltf) => {
   screenshotMesh = new THREE.Mesh(screenshotGeometry, screenshotMaterial);
   
   // Position screenshot inside the venue (adjust as needed)
-  screenshotMesh.position.set(edgeX, venueGroundHeight + 5, edgeZ - 10);
-  screenshotMesh.rotation.y = Math.PI; // Face towards the entrance
+  screenshotMesh.position.set(edgeX, venueGroundHeight + 7.5, edgeZ - 21);
+  screenshotMesh.rotation.y = 0; // Face towards the entrance
   screenshotMesh.userData.isClickable = true;
   scene.add(screenshotMesh);
   
   console.log('Screenshot added to venue at:', screenshotMesh.position);
   
+  // Helper function to create a canvas texture with text
+  function createButtonTexture(text, bgColor, textColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    
+    // Background with gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, bgColor);
+    gradient.addColorStop(1, shadeColor(bgColor, -30));
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Border
+    ctx.strokeStyle = shadeColor(bgColor, 30);
+    ctx.lineWidth = 8;
+    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+    
+    // Text
+    ctx.fillStyle = textColor;
+    ctx.font = 'bold 72px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+  
+  // Helper function to darken/lighten colors
+  function shadeColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = Math.max(0, Math.min(255, (num >> 16) + amt));
+    const G = Math.max(0, Math.min(255, (num >> 8 & 0x00FF) + amt));
+    const B = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
+    return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+  }
+  
+  // Create interactive cinema buttons next to screenshot with improved design
+  const buttonGeo = new THREE.BoxGeometry(2.5, 3.5, 0.3);
+  
+  // Left button (Mikkel - Blue) - position to the left of screenshot
+  const leftButtonTexture = createButtonTexture('MIKKEL', '#4444ff', '#ffffff');
+  const leftButtonMat = new THREE.MeshStandardMaterial({ 
+    map: leftButtonTexture,
+    color: 0xffffff,
+    emissive: 0x2222ff,
+    emissiveIntensity: 0.3,
+    metalness: 0.5,
+    roughness: 0.3
+  });
+  leftCinemaButton = new THREE.Mesh(buttonGeo, leftButtonMat);
+  leftCinemaButton.position.set(edgeX - 9.5, venueGroundHeight + 7.5, edgeZ - 21);
+  leftCinemaButton.rotation.y = 0;
+  leftCinemaButton.userData.isButton = true;
+  leftCinemaButton.userData.buttonType = 'mikkel';
+  leftCinemaButton.castShadow = true;
+  leftCinemaButton.receiveShadow = true;
+  scene.add(leftCinemaButton);
+  
+  // Right button (Kristian - Red) - position to the right of screenshot
+  const rightButtonTexture = createButtonTexture('KRISTIAN', '#ff4444', '#ffffff');
+  const rightButtonMat = new THREE.MeshStandardMaterial({ 
+    map: rightButtonTexture,
+    color: 0xffffff,
+    emissive: 0xff2222,
+    emissiveIntensity: 0.3,
+    metalness: 0.5,
+    roughness: 0.3
+  });
+  rightCinemaButton = new THREE.Mesh(buttonGeo, rightButtonMat);
+  rightCinemaButton.position.set(edgeX + 9.5, venueGroundHeight + 7.5, edgeZ - 21);
+  rightCinemaButton.rotation.y = 0;
+  rightCinemaButton.userData.isButton = true;
+  rightCinemaButton.userData.buttonType = 'kristian';
+  rightCinemaButton.castShadow = true;
+  rightCinemaButton.receiveShadow = true;
+  scene.add(rightCinemaButton);
+  
+  console.log('Cinema buttons added next to screenshot');
+  
 }, undefined, (err) => {
   console.error('Error loading venue:', err);
 });
 
-// OCaml meshes for collision and animation
-let ocamlMeshes = [];
-let ocamlMixer = null;
+makeOcaml(3.7, 8.2, 18.2, 6);
+makeOcaml(5.1, 8.2, 18.2, 6);
+makeOcaml(6.5, 8.2, 18.2, 6);
+makeOcaml(-2.9, 8.2, 18.2, 6);
+makeOcaml(-2.9, 7.45, 100, 30);
 
-// Load OCaml at spawn position
-loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
-  ocamlModel = ocamlGltf.scene;
+// Load Boris Johnson inside the venue
+loader.load('./assets/boris.glb', (borisGltf) => {
+  borisModel = borisGltf.scene;
   
-  // Scale OCaml to 2x Mohamed's size (Mohamed is roughly 2 units tall)
-  ocamlModel.scale.set(6, 6, 6);
+  // Scale Boris
+  borisModel.scale.set(0.02, 0.02, 0.02);
   
-  // Position at spawn (0, 0) on the terrain;
-  ocamlModel.position.set(3.7, 8.2, 18.2);
-
-  // Rotate him 180 degrees to face the camera
-  ocamlModel.rotation.y = Math.PI;  
+  // Position Boris inside the venue (adjust coordinates as needed)
+  const edgeX = 0;
+  const edgeZ = 0;
+  const venueGroundHeight = getTerrainHeight(edgeX, edgeZ);
   
-  // Build BVH for OCaml meshes and enable shadows
-  ocamlModel.traverse((node) => {
+  // Place Boris inside the venue (near the entrance or center)
+  borisPosition.set(6.5, 6.8, 46.3);
+  borisModel.position.copy(borisPosition);
+  
+  // Rotate Boris to face towards the entrance
+  borisModel.rotation.x = Math.PI / 2; // Facing negative Z direction
+  borisModel.rotation.z = Math.PI - 0.07; // Adjust as needed
+  
+  // Enable shadows
+  borisModel.traverse((node) => {
     if (node.isMesh) {
-      // Compute BVH for accurate collision
-      node.geometry.computeBoundsTree();
-      ocamlMeshes.push(node);
-      
       node.castShadow = true;
       node.receiveShadow = true;
-      
-      // Add debug wireframe to show collision mesh
-      const wireframeGeometry = new THREE.WireframeGeometry(node.geometry);
-      const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
-      const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
-      wireframe.position.copy(node.position);
-      wireframe.rotation.copy(node.rotation);
-      wireframe.scale.copy(node.scale);
-      node.add(wireframe); // Attach to the mesh so it moves with it
     }
   });
   
-  // Setup animation mixer for OCaml if animations exist
-  if (ocamlGltf.animations && ocamlGltf.animations.length > 0) {
-    ocamlMixer = new THREE.AnimationMixer(ocamlModel);
-    const ocamlAction = ocamlMixer.clipAction(ocamlGltf.animations[0]);
-    ocamlAction.play();
-    console.log('OCaml animation activated!');
+  // Add the positional audio to Boris
+  if (borisSound) {
+    borisModel.add(borisSound);
   }
   
-  scene.add(ocamlModel);
-
-
-  console.log('OCaml placed at spawn position with', ocamlMeshes.length, 'meshes for collision');
+  // Setup animation if available
+  if (borisGltf.animations && borisGltf.animations.length > 0) {
+    borisMixer = new THREE.AnimationMixer(borisModel);
+    borisAction = borisMixer.clipAction(borisGltf.animations[0]);
+    borisAction.setLoop(THREE.LoopRepeat, Infinity);
+    
+    // Add event listener to restart sound every time animation loops
+    borisMixer.addEventListener('loop', (e) => {
+      if (borisSound && borisSound.buffer) {
+        if (borisSound.isPlaying) {
+          borisSound.stop();
+        }
+        borisSound.play();
+        console.log('Boris sound restarted on animation loop');
+      }
+    });
+    
+    console.log('Boris Johnson animation loaded:', borisGltf.animations[0].name, 'Duration:', borisGltf.animations[0].duration);
+  }
+  
+  scene.add(borisModel);
+  console.log('Boris Johnson placed in venue at:', borisPosition);
 }, undefined, (err) => {
-  console.error('Error loading OCaml:', err);
+  console.error('Error loading Boris Johnson:', err);
 });
 
 // Create cinema-style screen with iframe
-const iframe = document.createElement('iframe');
-iframe.src = 'https://bytes-theta-gets-interior.trycloudflare.com/';
-iframe.style.width = '1920px';
-iframe.style.height = '1080px';
-iframe.style.border = '0';
-iframe.style.pointerEvents = 'auto'; // Enable interaction with iframe
+// const iframe = document.createElement('iframe');
+// iframe.src = 'https://bytes-theta-gets-interior.trycloudflare.com/';
+// iframe.style.width = '1920px';
+// iframe.style.height = '1080px';
+// iframe.style.border = '0';
+// iframe.style.pointerEvents = 'auto'; // Enable interaction with iframe
 
-const css3DObject = new CSS3DObject(iframe);
-css3DObject.position.set(50, 15, 50); // Position near spawn
-css3DObject.rotation.y = (Math.PI*1.2) ; // Angle towards spawn
-css3DObject.scale.set(0.02, 0.02, 0.02); // Scale down to reasonable size
-//scene.add(css3DObject);
+// const css3DObject = new CSS3DObject(iframe);
+// css3DObject.position.set(50, 15, 50); // Position near spawn
+// css3DObject.rotation.y = (Math.PI*1.2) ; // Angle towards spawn
+// css3DObject.scale.set(0.02, 0.02, 0.02); // Scale down to reasonable size
+// //scene.add(css3DObject);
 
-// Create a backing plane for the cinema screen (black frame)
-const screenGeometry = new THREE.PlaneGeometry(38.4, 21.6); // 16:9 aspect ratio
-const screenMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
-const screenMesh = new THREE.Mesh(screenGeometry, screenMaterial);
-screenMesh.position.copy(css3DObject.position);
-screenMesh.rotation.copy(css3DObject.rotation);
-screenMesh.position.z += 1; // Slightly behind the iframe
-//scene.add(screenMesh);
+// Cinema button variables
+let leftCinemaButton = null;
+let rightCinemaButton = null;
+let currentCinemaImage = 'mikkel';
 
-console.log('Cinema screen created at position:', css3DObject.position);
+// Load textures for cinema screen switching
+let mikkelTexture = null;
+let kristianTexture = null;
+let texturesLoaded = { mikkel: false, kristian: false };
+
+textureLoader.load(MIKKEL_SCREENSHOT, 
+  (texture) => {
+    mikkelTexture = texture;
+    texturesLoaded.mikkel = true;
+    console.log('Mikkel texture loaded successfully');
+  },
+  undefined,
+  (error) => {
+    console.error('Error loading Mikkel texture:', error);
+  }
+);
+
+textureLoader.load(KRISTIAN_SCREENSHOT, 
+  (texture) => {
+    kristianTexture = texture;
+    texturesLoaded.kristian = true;
+    console.log('Kristian texture loaded successfully');
+  },
+  undefined,
+  (error) => {
+    console.error('Error loading Kristian texture:', error);
+  }
+);
+
+// Function to switch cinema image on the screenshot mesh
+function switchCinemaImage(imageType) {
+  if (!screenshotMesh) {
+    console.log('Screenshot mesh not available yet');
+    return;
+  }
+  
+  if (imageType === 'mikkel' && currentCinemaImage !== 'mikkel') {
+    if (!texturesLoaded.mikkel || !mikkelTexture) {
+      console.log('Mikkel texture not loaded yet');
+      return;
+    }
+    
+    // Update the texture
+    screenshotMesh.material.map = mikkelTexture;
+    screenshotMesh.material.needsUpdate = true;
+    currentCinemaImage = 'mikkel';
+    console.log('Cinema: Switched to Mikkel');
+    
+    // Flash the button with scale animation
+    if (leftCinemaButton) {
+      leftCinemaButton.material.emissiveIntensity = 1.0;
+      leftCinemaButton.scale.set(1.1, 1.1, 1.1);
+      setTimeout(() => { 
+        leftCinemaButton.material.emissiveIntensity = 0.3;
+        leftCinemaButton.scale.set(1, 1, 1);
+      }, 200);
+    }
+  } else if (imageType === 'kristian' && currentCinemaImage !== 'kristian') {
+    if (!texturesLoaded.kristian || !kristianTexture) {
+      console.log('Kristian texture not loaded yet');
+      return;
+    }
+    
+    // Update the texture
+    screenshotMesh.material.map = kristianTexture;
+    screenshotMesh.material.needsUpdate = true;
+    currentCinemaImage = 'kristian';
+    console.log('Cinema: Switched to Kristian');
+    
+    // Flash the button with scale animation
+    if (rightCinemaButton) {
+      rightCinemaButton.material.emissiveIntensity = 1.0;
+      rightCinemaButton.scale.set(1.1, 1.1, 1.1);
+      setTimeout(() => { 
+        rightCinemaButton.material.emissiveIntensity = 0.3;
+        rightCinemaButton.scale.set(1, 1, 1);
+      }, 200);
+    }
+  }
+}
 
 // Function to show venue iframe
-function showVenueIframe() {
+function showVenueIframe(url = "MIKKEL_APP") {
   if (!venueIframe) {
-    // Create iframe for venue screenshot
-    venueIframe = document.createElement('iframe');
-    venueIframe.src = 'http://TEST';
-    venueIframe.style.width = '1920px';
-    venueIframe.style.height = '1080px';
-    venueIframe.style.border = '0';
-    venueIframe.style.pointerEvents = 'auto';
+    // Create container for iframe with close button
+    const iframeContainer = document.createElement('div');
+    iframeContainer.id = 'venue-iframe-container';
+    iframeContainer.style.position = 'fixed';
+    iframeContainer.style.top = '0';
+    iframeContainer.style.left = '0';
+    iframeContainer.style.width = '100vw';
+    iframeContainer.style.height = '100vh';
+    iframeContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    iframeContainer.style.zIndex = '1000';
+    iframeContainer.style.display = 'flex';
+    iframeContainer.style.alignItems = 'center';
+    iframeContainer.style.justifyContent = 'center';
     
-    venueCSS3DObject = new CSS3DObject(venueIframe);
-    venueCSS3DObject.position.set(0, 10, -50); // Position in front of camera
-    venueCSS3DObject.scale.set(0.02, 0.02, 0.02);
-    scene.add(venueCSS3DObject);
+    // Create close button
+    const closeButton = document.createElement('button');
+    closeButton.innerHTML = '✕ Close (ESC)';
+    closeButton.style.position = 'absolute';
+    closeButton.style.top = '20px';
+    closeButton.style.right = '20px';
+    closeButton.style.padding = '10px 20px';
+    closeButton.style.fontSize = '16px';
+    closeButton.style.backgroundColor = '#ff4444';
+    closeButton.style.color = 'white';
+    closeButton.style.border = 'none';
+    closeButton.style.borderRadius = '4px';
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.zIndex = '1001';
+    closeButton.onclick = hideVenueIframe;
+    
+    // Create iframe as a simple 2D overlay
+    venueIframe = document.createElement('iframe');
+    venueIframe.src = url;
+    venueIframe.style.width = '80vw';
+    venueIframe.style.height = '80vh';
+    venueIframe.style.maxWidth = '1200px';
+    venueIframe.style.maxHeight = '800px';
+    venueIframe.style.border = '2px solid #333';
+    venueIframe.style.borderRadius = '8px';
+    venueIframe.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
+    venueIframe.style.backgroundColor = '#000';
+    
+    iframeContainer.appendChild(closeButton);
+    iframeContainer.appendChild(venueIframe);
+    document.body.appendChild(iframeContainer);
+    
+    // Store reference to container
+    venueIframe._container = iframeContainer;
+  } else {
+    // Show existing iframe and update URL
+    venueIframe.src = url;
+    venueIframe._container.style.display = 'flex';
+    console.log('Updating iframe URL to:', url);
   }
   
   // Exit pointer lock to allow iframe interaction
   document.exitPointerLock();
   isVenueIframeVisible = true;
-  cssRenderer.domElement.style.pointerEvents = 'auto';
   
-  // Update iframe position relative to camera
-  updateVenueIframePosition();
-  
-  console.log('Venue iframe displayed');
+  console.log('Venue iframe displayed with URL:', url);
 }
 
 // Function to hide venue iframe
 function hideVenueIframe() {
-  if (venueCSS3DObject && isVenueIframeVisible) {
-    scene.remove(venueCSS3DObject);
+  if (venueIframe && isVenueIframeVisible) {
+    venueIframe._container.style.display = 'none';
     isVenueIframeVisible = false;
-    cssRenderer.domElement.style.pointerEvents = 'none';
     
     // Re-lock pointer
     renderer.domElement.requestPointerLock();
@@ -529,18 +819,10 @@ function hideVenueIframe() {
   }
 }
 
-// Function to update iframe position to follow camera
+// Function to update iframe position to follow camera (no longer needed - iframe is static)
 function updateVenueIframePosition() {
-  if (venueCSS3DObject && isVenueIframeVisible) {
-    // Position iframe in front of camera
-    const distance = 50;
-    const iframeX = camera.position.x - Math.sin(cameraYaw) * distance;
-    const iframeZ = camera.position.z - Math.cos(cameraYaw) * distance;
-    const iframeY = camera.position.y;
-    
-    venueCSS3DObject.position.set(iframeX, iframeY, iframeZ);
-    venueCSS3DObject.rotation.y = cameraYaw;
-  }
+  // Iframe now stays in place where it was opened
+  // No continuous updates needed
 }
 
 // Camera rotation state
@@ -555,19 +837,35 @@ const mouse = new THREE.Vector2();
 
 // Request pointer lock on click
 document.addEventListener('click', (event) => {
-  // Check if clicking on screenshot when pointer is locked
-  if (isPointerLocked && screenshotMesh) {
+  if (isPointerLocked) {
     // Calculate mouse position in normalized device coordinates (-1 to +1)
     mouse.x = 0; // Center of screen in pointer lock
     mouse.y = 0;
     
     clickRaycaster.setFromCamera(mouse, camera);
-    const intersects = clickRaycaster.intersectObject(screenshotMesh);
     
-    if (intersects.length > 0) {
-      // Clicked on screenshot - show iframe
-      showVenueIframe();
-      return;
+    // Check for cinema button clicks
+    if (leftCinemaButton && rightCinemaButton) {
+      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+      if (buttonIntersects.length > 0) {
+        const clickedButton = buttonIntersects[0].object;
+        if (clickedButton.userData.buttonType) {
+          switchCinemaImage(clickedButton.userData.buttonType);
+          return;
+        }
+      }
+    }
+    
+    // Check if clicking on screenshot
+    if (screenshotMesh) {
+      const intersects = clickRaycaster.intersectObject(screenshotMesh);
+      if (intersects.length > 0) {
+        // Clicked on screenshot - show iframe with URL based on current image
+        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+        showVenueIframe(url);
+        console.log('Opening iframe with:', url);
+        return;
+      }
     }
   }
   
@@ -610,9 +908,14 @@ const direction = new THREE.Vector3();
 function onKeyDown(e) {
   // Check for Escape key to close venue iframe
   if (e.code === 'Escape' && isVenueIframeVisible) {
+    e.preventDefault();
+    e.stopPropagation();
     hideVenueIframe();
+    console.log('Escape pressed - closing iframe');
     return;
   }
+
+  if (isVenueIframeVisible) return
   
   switch (e.code) {
     case 'ArrowUp':
@@ -662,6 +965,8 @@ function onKeyDown(e) {
   }
 }
 function onKeyUp(e) {
+  if (isVenueIframeVisible) return
+
   switch (e.code) {
     case 'ArrowUp':
     case 'KeyW': if (move.forward === 1) move.forward = 0; break;
@@ -680,7 +985,129 @@ function onKeyUp(e) {
 document.addEventListener('keydown', onKeyDown);
 document.addEventListener('keyup', onKeyUp);
 
+// Additional escape key handler with capture to prevent iframe from consuming it
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && isVenueIframeVisible) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideVenueIframe();
+    console.log('Window escape handler - closing iframe');
+  }
+}, true); // Use capture phase
 
+// Mobile controls
+const joystickContainer = document.getElementById('joystick-container');
+const joystickStick = document.getElementById('joystick-stick');
+const jumpButton = document.getElementById('jump-button');
+
+let joystickActive = false;
+let joystickCenter = { x: 0, y: 0 };
+let joystickDelta = { x: 0, y: 0 };
+
+if (joystickContainer) {
+  // Joystick touch handling
+  joystickContainer.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    joystickActive = true;
+    const rect = joystickContainer.getBoundingClientRect();
+    joystickCenter.x = rect.left + rect.width / 2;
+    joystickCenter.y = rect.top + rect.height / 2;
+  });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!joystickActive) return;
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - joystickCenter.x;
+    const deltaY = touch.clientY - joystickCenter.y;
+    
+    const maxDistance = 35; // Maximum joystick travel distance
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    if (distance < maxDistance) {
+      joystickDelta.x = deltaX / maxDistance;
+      joystickDelta.y = deltaY / maxDistance;
+      joystickStick.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
+    } else {
+      const angle = Math.atan2(deltaY, deltaX);
+      const limitedX = Math.cos(angle) * maxDistance;
+      const limitedY = Math.sin(angle) * maxDistance;
+      joystickDelta.x = limitedX / maxDistance;
+      joystickDelta.y = limitedY / maxDistance;
+      joystickStick.style.transform = `translate(calc(-50% + ${limitedX}px), calc(-50% + ${limitedY}px))`;
+    }
+    
+    // Update movement state based on joystick
+    move.forward = -joystickDelta.y; // Inverted Y for forward/back
+    move.right = -joystickDelta.x; // Inverted X for left/right
+  });
+
+  document.addEventListener('touchend', (e) => {
+    if (!joystickActive) return;
+    joystickActive = false;
+    joystickDelta.x = 0;
+    joystickDelta.y = 0;
+    joystickStick.style.transform = 'translate(-50%, -50%)';
+    
+    // Reset movement
+    move.forward = 0;
+    move.right = 0;
+  });
+}
+
+if (jumpButton) {
+  jumpButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (canJump) {
+      velocity.y += 10;
+      canJump = false;
+      if (jumpingSound.buffer && !jumpingSound.isPlaying) {
+        jumpingSound.play();
+      }
+    }
+  });
+}
+
+// Mobile touch controls for camera rotation
+let isTouchRotating = false;
+let lastTouchX = 0;
+let lastTouchY = 0;
+
+document.addEventListener('touchstart', (e) => {
+  // Only handle camera rotation if touching outside controls
+  const touch = e.touches[0];
+  const touchY = touch.clientY;
+  
+  // Check if touch is in upper 2/3 of screen (not on controls)
+  if (touchY < window.innerHeight * 0.66) {
+    isTouchRotating = true;
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+  }
+});
+
+document.addEventListener('touchmove', (e) => {
+  if (!isTouchRotating) return;
+  
+  const touch = e.touches[0];
+  const deltaX = touch.clientX - lastTouchX;
+  const deltaY = touch.clientY - lastTouchY;
+  
+  const sensitivity = 0.005;
+  cameraYaw -= deltaX * sensitivity;
+  cameraPitch -= deltaY * sensitivity;
+  
+  // Clamp pitch
+  cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
+  
+  lastTouchX = touch.clientX;
+  lastTouchY = touch.clientY;
+});
+
+document.addEventListener('touchend', () => {
+  isTouchRotating = false;
+});
 
 // Camera follow offset
 const cameraOffset = new THREE.Vector3(0, 4, 6);
@@ -707,8 +1134,42 @@ function animate() {
   if (mixer) {
     mixer.update(delta);
   }
-  if (ocamlMixer) {
-    ocamlMixer.update(delta);
+  if (ocamlMixers.length > 0) {
+    ocamlMixers.forEach(mixer => mixer.update(delta));
+  }
+  if (borisMixer) {
+    borisMixer.update(delta);
+  }
+
+  // Check proximity to Boris Johnson and play sound/animation
+  if (borisModel && borisSound) {
+    const distanceToBoris = character.position.distanceTo(borisPosition);
+    const proximityThreshold = 10; // Distance at which Boris sound starts playing
+    
+    if (distanceToBoris < proximityThreshold) {
+      // Start animation and sound together
+      if (borisAction && !borisAction.isRunning()) {
+        borisAction.play();
+        console.log('Boris Johnson animation started!');
+        
+        // Start sound when animation starts
+        if (borisSound.buffer && !borisSound.isPlaying) {
+          borisSound.play();
+          console.log('Boris Johnson sound started!');
+        }
+      }
+    } else {
+      // Stop sound
+      if (borisSound.isPlaying) {
+        borisSound.stop();
+        console.log('Boris Johnson sound stopped!');
+      }
+      // Stop animation
+      if (borisAction && borisAction.isRunning()) {
+        borisAction.stop();
+        console.log('Boris Johnson animation stopped!');
+      }
+    }
   }
 
   // Movement physics
@@ -748,7 +1209,7 @@ function animate() {
     character.position.z += dz * speed * delta;
     
     // Check for horizontal collision with venue and OCaml
-    const collidableMeshes = [...ocamlMeshes, ...venueMeshes];
+    const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
     if (collidableMeshes.length > 0) {
       const horizontalRaycaster = new THREE.Raycaster();
       const playerHeight = 1.0; // Check at player's center height
@@ -787,7 +1248,7 @@ function animate() {
   raycaster.set(rayOrigin, rayDirection);
   
   // Combine all collidable meshes
-  const collidableMeshes = [...ocamlMeshes, ...venueMeshes];
+  const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
   
   if (collidableMeshes.length > 0) {
     // Check intersection with all meshes
@@ -914,8 +1375,6 @@ function animate() {
       
     
     }
-
-    console.log('Character Y:', character.position.y.toFixed(2), 'Terrain Height:', terrainHeight.toFixed(2));
     
   }
 
@@ -930,8 +1389,10 @@ function animate() {
   desiredCamPos = new THREE.Vector3(camX, camY, camZ);
   
   // Smooth camera movement
-  camera.position.lerp(desiredCamPos, 1 - Math.pow(0.01, delta));
-  camera.lookAt(character.position.x, character.position.y + 1.0, character.position.z);
+  if (!isVenueIframeVisible) {
+    camera.position.lerp(desiredCamPos, 1 - Math.pow(0.01, delta));
+    camera.lookAt(character.position.x, character.position.y + 2.5, character.position.z);
+  }
 
   // Update shadow camera to follow Mohamed for better shadow quality
   dir.position.set(
@@ -946,11 +1407,6 @@ function animate() {
   const coordsElement = document.getElementById('coordinates');
   if (coordsElement) {
     coordsElement.textContent = `Position: X: ${character.position.x.toFixed(1)}, Y: ${character.position.y.toFixed(1)}, Z: ${character.position.z.toFixed(1)}`;
-  }
-
-  // Update venue iframe position if visible
-  if (isVenueIframeVisible) {
-    updateVenueIframePosition();
   }
 
   renderer.render(scene, camera);
@@ -975,6 +1431,66 @@ camera.position.set(
 camera.lookAt(character.position);
 
 // Start
+themeSound.play();
 animate();
 
 
+function makeOcaml(x, y, z, size) {
+
+    // Load OCaml at spawn position
+    loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
+      ocamlModel = ocamlGltf.scene;
+
+      let ocamlMeshes = [];
+      
+      // Scale OCaml to size
+      ocamlModel.scale.set(size, size, size);
+      
+      // Position at spawn (0, 0) on the terrain;
+      ocamlModel.position.set(x, y, z);
+
+      // Rotate him 180 degrees to face the camera
+      ocamlModel.rotation.y = Math.PI;  
+      
+      // Build BVH for OCaml meshes and enable shadows
+      ocamlModel.traverse((node) => {
+        if (node.isMesh) {
+          // Compute BVH for accurate collision
+          node.geometry.computeBoundsTree();
+          ocamlMeshes.push(node);
+          
+          node.castShadow = true;
+          node.receiveShadow = true;
+          
+          // Add debug wireframe to show collision mesh
+          if (wireframeDebug) addWireframeDebug(node);
+        }
+      });
+      
+      // Setup animation mixer for OCaml if animations exist
+      if (ocamlGltf.animations && ocamlGltf.animations.length > 0) {
+        ocamlMixers.push(new THREE.AnimationMixer(ocamlModel));
+        const ocamlAction = ocamlMixers[ocamlMixers.length - 1].clipAction(ocamlGltf.animations[0]);
+        ocamlAction.setLoop(THREE.LoopRepeat); // Make animation loop
+        ocamlAction.play();
+        console.log('OCaml animation activated with looping!');
+      }
+      
+      scene.add(ocamlModel);
+
+
+      console.log('OCaml placed at spawn position with', ocamlMeshes.length, 'meshes for collision');
+    }, undefined, (err) => {
+      console.error('Error loading OCaml:', err);
+    });
+}
+
+function addWireframeDebug(node) {
+  const wireframeGeometry = new THREE.WireframeGeometry(node.geometry);
+  const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+  const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+  wireframe.position.copy(node.position);
+  wireframe.rotation.copy(node.rotation);
+  wireframe.scale.copy(node.scale);
+  node.add(wireframe); // Attach to the mesh so it moves with it
+}

@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 5500
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5500", "--workers", "2", "--threads", "4", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5500", "--workers", "8", "--threads", "4", "app:app"]
