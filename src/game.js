@@ -12,7 +12,7 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https:
 
 const KRISTIAN_APP = "https://recruitment-dealers-ebooks-agree.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
-const MIKKEL_APP = "https://appeared-dean-accordance-shelf.trycloudflare.com"
+const MIKKEL_APP = "https://au-rooms.omikkel.com"
 const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
 const wireframeDebug = false;
 const ANTI_FLICKER_HEIGHT = 0.15; // Height offset to reduce z-fighting flickering
