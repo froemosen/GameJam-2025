@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 
-const KRISTIAN_APP = "https://recruitment-dealers-ebooks-agree.trycloudflare.com/"
+const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
 const MIKKEL_APP = "https://au-rooms.omikkel.com"
 const MIKKEL_SCREENSHOT = "./assets/mikkelScreenshot.jpg"
@@ -436,7 +436,7 @@ camera.add(audioListener);
 
 const audioLoader = new THREE.AudioLoader();
 
-const themeSound = new THREE.Audio(audioListener);
+const themeSound = new THREE.PositionalAudio(audioListener);
 
 // Create audio objects for different states
 const walkingSound = new THREE.Audio(audioListener);
@@ -448,7 +448,11 @@ const jumpingSound = new THREE.Audio(audioListener);
 audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
   themeSound.setBuffer(buffer);
   themeSound.setLoop(true);
-  themeSound.setVolume(0.02);
+  themeSound.setVolume(0.1);
+  themeSound.setRefDistance(15); // Full volume within 15 units
+  themeSound.setMaxDistance(50); // Fade out at 50 units
+  themeSound.setRolloffFactor(2.0); // Very aggressive volume falloff
+  themeSound.setDistanceModel('exponential'); // Exponential falloff for dramatic distance effect
 });
 
 
@@ -601,6 +605,12 @@ loader.load('./assets/venue.glb', (gltf) => {
       
     }
   });
+  
+  // Attach theme music to venue so it's spatially positioned at the stage
+  if (themeSound) {
+    venueModel.add(themeSound);
+    console.log('Theme music positioned at venue');
+  }
   
   scene.add(venueModel);
   console.log('Venue loaded with', venueMeshes.length, 'meshes for collision');
@@ -1635,8 +1645,6 @@ function makeOcaml(x, y, z, size) {
     // Load OCaml at spawn position
     loader.load('./assets/OCamlHeadBop.glb', (ocamlGltf) => {
       ocamlModel = ocamlGltf.scene;
-
-      let ocamlMeshes = [];
       
       // Scale OCaml to size
       ocamlModel.scale.set(size, size, size);
@@ -1655,7 +1663,8 @@ function makeOcaml(x, y, z, size) {
         if (node.isMesh) {
           // Compute BVH for accurate collision
           node.geometry.computeBoundsTree();
-          ocamlMeshes.push(node);
+          // Add to global collision array
+          ocamlsMeshes.push(node);
           
           node.castShadow = true;
           node.receiveShadow = true;
@@ -1676,8 +1685,7 @@ function makeOcaml(x, y, z, size) {
       
       scene.add(ocamlModel);
 
-
-      console.log('OCaml placed at spawn position with', ocamlMeshes.length, 'meshes for collision');
+      console.log('OCaml placed at position with meshes added to global collision array');
     }, undefined, (err) => {
       console.error('Error loading OCaml:', err);
     });
