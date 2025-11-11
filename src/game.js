@@ -2281,29 +2281,22 @@ let multiplayerClient = null;
 let currentAnimationState = 'idle';
 let gameStarted = false; // Flag to prevent pointer lock until game starts
 
-// Function to start the game with a session ID
-function startGameWithSession(sessionId) {
-  console.log('Starting game with session ID:', sessionId);
+// Function to start the game with a session ID and username
+function startGameWithSession(sessionId, username) {
+  console.log('Starting game with session ID:', sessionId, 'username:', username);
   
   // Enable pointer lock and show the game canvas
   gameStarted = true;
   container.style.display = 'block';
   
-  // Prompt for username
-  let username = localStorage.getItem('gameUsername');
-  console.log('Username from localStorage:', username);
-  if (!username) {
-    username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
-    if (username && username.trim()) {
-      username = username.trim().substring(0, 20); // Limit to 20 chars
-      localStorage.setItem('gameUsername', username);
-      console.log('Saved new username to localStorage:', username);
-    } else {
-      username = 'Player' + Math.floor(Math.random() * 1000);
-      console.log('Generated random username:', username);
-    }
+  // Validate and sanitize username
+  if (!username || !username.trim()) {
+    username = 'Player' + Math.floor(Math.random() * 1000);
+    console.log('No username provided, generated random username:', username);
   } else {
-    console.log('Using existing username from localStorage:', username);
+    username = username.trim().substring(0, 20); // Limit to 20 chars
+    localStorage.setItem('gameUsername', username);
+    console.log('Using username:', username);
   }
 
   try {

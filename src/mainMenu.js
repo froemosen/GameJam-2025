@@ -23,6 +23,20 @@ export class MainMenu {
           
           <div class="menu-content">
             <div class="menu-section">
+              <h2>Your Username</h2>
+              <div class="username-form">
+                <input 
+                  type="text" 
+                  id="username-input" 
+                  class="menu-input" 
+                  placeholder="Enter your username..."
+                  maxlength="20"
+                  value=""
+                />
+              </div>
+            </div>
+            
+            <div class="menu-section">
               <h2>Create New Session</h2>
               <div class="session-create-form">
                 <input 
@@ -76,6 +90,15 @@ export class MainMenu {
     // Add menu to DOM
     document.body.insertAdjacentHTML('beforeend', menuHTML);
     this.menuElement = document.getElementById('main-menu');
+    
+    // Load saved username if exists
+    const savedUsername = localStorage.getItem('gameUsername');
+    if (savedUsername) {
+      const usernameInput = document.getElementById('username-input');
+      if (usernameInput) {
+        usernameInput.value = savedUsername;
+      }
+    }
     
     // Add event listeners
     this.setupEventListeners();
@@ -400,7 +423,7 @@ export class MainMenu {
   
   connectToServer() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     
     this.ws = new WebSocket(wsUrl);
     
@@ -459,6 +482,15 @@ export class MainMenu {
   }
   
   createSession() {
+    const usernameInput = document.getElementById('username-input');
+    const username = usernameInput.value.trim();
+    
+    if (!username) {
+      alert('Please enter a username first!');
+      usernameInput.focus();
+      return;
+    }
+    
     const nameInput = document.getElementById('session-name-input');
     const sessionName = nameInput.value.trim() || 'Unnamed Session';
     
@@ -473,6 +505,15 @@ export class MainMenu {
   }
   
   joinSessionById() {
+    const usernameInput = document.getElementById('username-input');
+    const username = usernameInput.value.trim();
+    
+    if (!username) {
+      alert('Please enter a username first!');
+      usernameInput.focus();
+      return;
+    }
+    
     const idInput = document.getElementById('session-id-input');
     const sessionId = idInput.value.trim().toUpperCase();
     
@@ -492,6 +533,15 @@ export class MainMenu {
   }
   
   joinSession(sessionId) {
+    const usernameInput = document.getElementById('username-input');
+    const username = usernameInput.value.trim();
+    
+    if (!username) {
+      alert('Please enter a username first!');
+      usernameInput.focus();
+      return;
+    }
+    
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'joinSession',
@@ -561,13 +611,17 @@ export class MainMenu {
       this.ws.close();
     }
     
+    // Get username from input
+    const usernameInput = document.getElementById('username-input');
+    const username = usernameInput ? usernameInput.value.trim() : '';
+    
     // Hide menu with animation
     this.menuElement.style.animation = 'menuFadeIn 0.3s ease-out reverse';
     setTimeout(() => {
       this.menuElement.style.display = 'none';
       
-      // Start the game with session ID
-      this.onStartGame(sessionId);
+      // Start the game with session ID and username
+      this.onStartGame(sessionId, username);
     }, 300);
   }
   
