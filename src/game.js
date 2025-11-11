@@ -12,8 +12,9 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https:
 import { MultiplayerClient } from './multiplayer.js';
 import { OptimizedTerrain } from './terrain.js';
 
-// Make THREE globally available for multiplayer module
+// Make THREE and GLTFLoader globally available for multiplayer module
 window.THREE = THREE;
+window.GLTFLoader = GLTFLoader;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"

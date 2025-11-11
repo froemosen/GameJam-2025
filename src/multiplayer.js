@@ -111,18 +111,18 @@ export class MultiplayerClient {
     );
     playerGroup.rotation.y = playerData.rotation.y;
     
-    // Create a visible mesh (colored box for now, can be replaced with model)
+    // Create a temporary placeholder box until Mohamed model loads
     const geometry = new THREE.BoxGeometry(1, 2, 1);
     const material = new THREE.MeshStandardMaterial({
       color: this.getRandomPlayerColor(),
       metalness: 0.3,
       roughness: 0.7
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.y = 1;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    playerGroup.add(mesh);
+    const tempMesh = new THREE.Mesh(geometry, material);
+    tempMesh.position.y = 1;
+    tempMesh.castShadow = true;
+    tempMesh.receiveShadow = true;
+    playerGroup.add(tempMesh);
     
     // Add name tag
     const nameTag = this.createNameTag(playerData.id);
@@ -131,12 +131,86 @@ export class MultiplayerClient {
     
     this.scene.add(playerGroup);
     
-    this.remotePlayers.set(playerData.id, {
+    const playerState = {
       group: playerGroup,
-      mesh: mesh,
+      mesh: tempMesh,
       targetPosition: { ...playerData.position },
       targetRotation: { ...playerData.rotation },
-      currentAnimation: playerData.animation || 'idle'
+      currentAnimation: playerData.animation || 'idle',
+      mixer: null,
+      animations: {}
+    };
+    
+    this.remotePlayers.set(playerData.id, playerState);
+    
+    // Load Mohamed model for remote player (same as local player)
+    this.loadMohamedForPlayer(playerData.id, playerState);
+  }
+  
+  loadMohamedForPlayer(playerId, playerState) {
+    const THREE = window.THREE;
+    const GLTFLoader = window.GLTFLoader;
+    
+    if (!GLTFLoader) {
+      console.warn('GLTFLoader not available, using box placeholder');
+      return;
+    }
+    
+    const loader = new GLTFLoader();
+    
+    // Load Mohamed model and animations for remote player
+    Promise.all([
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Character_output.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Idle_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Walking_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Running_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Run_03_withSkin.glb', resolve, undefined, reject);
+      })
+    ]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf]) => {
+      // Check if player still exists (might have disconnected during loading)
+      if (!this.remotePlayers.has(playerId)) {
+        return;
+      }
+      
+      const mohamedModel = characterGltf.scene;
+      mohamedModel.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      
+      // Remove temp box placeholder
+      playerState.group.remove(playerState.mesh);
+      
+      // Add Mohamed model
+      playerState.group.add(mohamedModel);
+      playerState.mesh = mohamedModel;
+      
+      // Setup animation mixer
+      playerState.mixer = new THREE.AnimationMixer(mohamedModel);
+      playerState.animations.idle = playerState.mixer.clipAction(idleGltf.animations[0]);
+      playerState.animations.walk = playerState.mixer.clipAction(walkGltf.animations[0]);
+      playerState.animations.run = playerState.mixer.clipAction(runGltf.animations[0]);
+      playerState.animations.swim = playerState.mixer.clipAction(swimGltf.animations[0]);
+      
+      // Start with idle animation
+      playerState.animations.idle.play();
+      playerState.currentAction = playerState.animations.idle;
+      
+      console.log(`Mohamed model loaded for remote player ${playerId}`);
+    }).catch(err => {
+      console.error(`Error loading Mohamed for player ${playerId}:`, err);
+      // Keep using box placeholder
     });
   }
   
@@ -234,6 +308,24 @@ export class MultiplayerClient {
   update(delta) {
     // Smooth interpolation for remote players
     this.remotePlayers.forEach((player) => {
+      // Update animation mixer if available
+      if (player.mixer) {
+        player.mixer.update(delta);
+        
+        // Update animation based on current state
+        if (player.animations && player.currentAnimation) {
+          const targetAnim = player.animations[player.currentAnimation];
+          if (targetAnim && player.currentAction !== targetAnim) {
+            // Fade to new animation
+            if (player.currentAction) {
+              player.currentAction.fadeOut(0.3);
+            }
+            targetAnim.reset().fadeIn(0.3).play();
+            player.currentAction = targetAnim;
+          }
+        }
+      }
+      
       // Lerp position
       player.group.position.x += (player.targetPosition.x - player.group.position.x) * 0.3;
       player.group.position.y += (player.targetPosition.y - player.group.position.y) * 0.3;
@@ -250,9 +342,10 @@ export class MultiplayerClient {
       
       player.group.rotation.y += diff * 0.3;
       
-      // Make name tag face camera
-      if (player.group.children[1]) {
-        player.group.children[1].lookAt(this.camera.position);
+      // Make name tag face camera (it's the last child after Mohamed model is loaded)
+      const nameTag = player.group.children[player.group.children.length - 1];
+      if (nameTag && nameTag.isSprite) {
+        nameTag.lookAt(this.camera.position);
       }
     });
   }
