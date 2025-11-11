@@ -73,8 +73,11 @@ export class MultiplayerClient {
         console.error('WebSocket error:', error);
       };
       
-      this.ws.onclose = () => {
-        console.log('Disconnected from MMO server');
+      this.ws.onclose = (event) => {
+        // Only log unexpected disconnections (not normal closes)
+        if (event.code !== 1000 && event.code !== 1001) {
+          console.log('Disconnected from MMO server (code:', event.code, ')');
+        }
         this.stopUpdateLoop();
         this.attemptReconnect();
       };

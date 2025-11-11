@@ -450,8 +450,11 @@ export class MainMenu {
       console.error('Menu WebSocket error:', error);
     };
     
-    this.ws.onclose = () => {
-      console.log('Menu disconnected from server');
+    this.ws.onclose = (event) => {
+      // Only log if it's an unexpected disconnection
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log('Menu disconnected from server (code:', event.code, ')');
+      }
       if (this.sessionListUpdateInterval) {
         clearInterval(this.sessionListUpdateInterval);
       }

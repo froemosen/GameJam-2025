@@ -2304,26 +2304,26 @@ function startGameWithSession(sessionId, username) {
     multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel, sessionId);
     console.log('Multiplayer MMO client initialized with username:', username);
     
-    // Add player count display (bottom left)
-    const playerCountEl = document.createElement('div');
-    playerCountEl.id = 'player-count';
-    playerCountEl.style.position = 'fixed';
-    playerCountEl.style.bottom = '10px';
-    playerCountEl.style.left = '10px';
-    playerCountEl.style.padding = '10px';
-    playerCountEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    playerCountEl.style.color = 'white';
-    playerCountEl.style.fontFamily = 'Arial, sans-serif';
-    playerCountEl.style.fontSize = '14px';
-    playerCountEl.style.borderRadius = '5px';
-    playerCountEl.style.zIndex = '1000';
-    playerCountEl.textContent = 'Players: 1';
-    document.body.appendChild(playerCountEl);
+    // Add game info display (bottom left)
+    const gameInfoEl = document.createElement('div');
+    gameInfoEl.id = 'game-info';
+    gameInfoEl.style.position = 'fixed';
+    gameInfoEl.style.bottom = '10px';
+    gameInfoEl.style.left = '10px';
+    gameInfoEl.style.padding = '10px';
+    gameInfoEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    gameInfoEl.style.color = 'white';
+    gameInfoEl.style.fontFamily = 'Arial, sans-serif';
+    gameInfoEl.style.fontSize = '14px';
+    gameInfoEl.style.borderRadius = '5px';
+    gameInfoEl.style.zIndex = '1000';
+    gameInfoEl.innerHTML = `<div>Session: ${sessionId}</div><div>Players: 1</div>`;
+    document.body.appendChild(gameInfoEl);
     
     // Update player count every second
     setInterval(() => {
       if (multiplayerClient) {
-        playerCountEl.textContent = `Players: ${multiplayerClient.getPlayerCount()}`;
+        gameInfoEl.innerHTML = `<div>Session: ${sessionId}</div><div>Players: ${multiplayerClient.getPlayerCount()}</div>`;
       }
     }, 1000);
   } catch (error) {

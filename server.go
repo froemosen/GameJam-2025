@@ -36,6 +36,7 @@ type Player struct {
 	Animation     string             `json:"animation"`
 	LastUpdate    time.Time          `json:"-"`
 	Conn          *websocket.Conn    `json:"-"`
+	Disconnected  bool               `json:"-"`
 	mu            sync.RWMutex       `json:"-"`
 }
 
@@ -290,7 +291,8 @@ func handlePlayerMessages(player *Player) {
 			handleMessage(player, &msg)
 
 		case err := <-errorChan:
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			// Only log unexpected errors (not normal closes)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
 				log.Printf("WebSocket error for player %s: %v", player.ID, err)
 			}
 			return
@@ -302,7 +304,10 @@ func handlePlayerMessages(player *Player) {
 			player.mu.Unlock()
 
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("Player %s ping failed: %v", player.ID, err)
+				// Only log if it's not a "connection closed" error
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					log.Printf("Player %s ping failed: %v", player.ID, err)
+				}
 				return
 			}
 		}
@@ -343,9 +348,9 @@ func handleListSessions(player *Player) {
 	}
 	state.mu.RUnlock()
 
-	response, _ := json.Marshal(Message{
-		Type:    "sessionList",
-		Players: sessions,
+	response, _ := json.Marshal(map[string]interface{}{
+		"type":     "sessionList",
+		"sessions": sessions,
 	})
 
 	player.mu.RLock()
@@ -525,11 +530,17 @@ func handleSound(player *Player, msg *Message) {
 
 // Handle player disconnect
 func handleDisconnect(player *Player) {
-	log.Printf("Player %s disconnected", player.ID)
-
-	player.mu.RLock()
+	// Prevent duplicate disconnect handling
+	player.mu.Lock()
+	if player.Disconnected {
+		player.mu.Unlock()
+		return
+	}
+	player.Disconnected = true
 	sessionID := player.SessionID
-	player.mu.RUnlock()
+	player.mu.Unlock()
+
+	log.Printf("Player %s disconnected", player.ID)
 
 	state.mu.Lock()
 	delete(state.players, player.ID)
