@@ -102,6 +102,10 @@ export class MultiplayerClient {
       case 'playerUpdate':
         this.updateRemotePlayer(data);
         break;
+        
+      case 'sound':
+        this.playRemoteSound(data);
+        break;
     }
   }
   
@@ -195,8 +199,26 @@ export class MultiplayerClient {
       }),
       new Promise((resolve, reject) => {
         loader.load('./assets/mohamed/Animation_Run_03_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Agree_Gesture_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_All_Night_Dance_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Boom_Dance_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Boxing_Practice_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Dead_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Skill_01_withSkin.glb', resolve, undefined, reject);
       })
-    ]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf]) => {
+    ]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf, agreeGltf, danceGltf, boomGltf, boxingGltf, deadGltf, skillGltf]) => {
       // Check if player still exists (might have disconnected during loading)
       if (!this.remotePlayers.has(playerId)) {
         return;
@@ -223,6 +245,12 @@ export class MultiplayerClient {
       playerState.animations.walk = playerState.mixer.clipAction(walkGltf.animations[0]);
       playerState.animations.run = playerState.mixer.clipAction(runGltf.animations[0]);
       playerState.animations.swim = playerState.mixer.clipAction(swimGltf.animations[0]);
+      playerState.animations.agree = playerState.mixer.clipAction(agreeGltf.animations[0]);
+      playerState.animations.dance = playerState.mixer.clipAction(danceGltf.animations[0]);
+      playerState.animations.boom = playerState.mixer.clipAction(boomGltf.animations[0]);
+      playerState.animations.boxing = playerState.mixer.clipAction(boxingGltf.animations[0]);
+      playerState.animations.dead = playerState.mixer.clipAction(deadGltf.animations[0]);
+      playerState.animations.skill = playerState.mixer.clipAction(skillGltf.animations[0]);
       
       // Start with idle animation
       playerState.animations.idle.play();
@@ -285,7 +313,12 @@ export class MultiplayerClient {
       // Smooth interpolation target
       player.targetPosition = data.position;
       player.targetRotation = data.rotation;
-      player.currentAnimation = data.animation;
+      
+      // Update animation if it changed
+      if (player.currentAnimation !== data.animation) {
+        console.log(`Player ${data.id} animation changed: ${player.currentAnimation} -> ${data.animation}`);
+        player.currentAnimation = data.animation;
+      }
     }
   }
   
@@ -331,6 +364,96 @@ export class MultiplayerClient {
     this.currentAnimation = animation;
   }
   
+  triggerSound(soundType) {
+    // Send sound trigger to other players
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const soundMessage = {
+        type: 'sound',
+        soundType: soundType,
+        position: {
+          x: this.localPlayer.position.x,
+          y: this.localPlayer.position.y,
+          z: this.localPlayer.position.z
+        }
+      };
+      this.ws.send(JSON.stringify(soundMessage));
+    }
+  }
+  
+  playRemoteSound(data) {
+    // Play positional audio for remote player sounds
+    const THREE = window.THREE;
+    
+    // Don't play our own sounds
+    if (data.id === this.playerId) {
+      return;
+    }
+    
+    console.log(`Playing sound ${data.soundType} from player ${data.id}`);
+    
+    // Create a temporary audio source at the player's position
+    const audioListener = this.camera.children.find(child => child.type === 'AudioListener');
+    if (!audioListener) {
+      console.warn('No audio listener found on camera');
+      return;
+    }
+    
+    const sound = new THREE.PositionalAudio(audioListener);
+    sound.setRefDistance(10);
+    sound.setMaxDistance(50);
+    sound.setRolloffFactor(1.5);
+    
+    // Create a temporary object at the sound position
+    const soundSource = new THREE.Object3D();
+    soundSource.position.set(data.position.x, data.position.y, data.position.z);
+    this.scene.add(soundSource);
+    soundSource.add(sound);
+    
+    // Load and play the appropriate sound
+    const audioLoader = new THREE.AudioLoader();
+    let soundFile = null;
+    
+    switch (data.soundType) {
+      case 'agree':
+        soundFile = './assets/sounds/agree.wav';
+        break;
+      case 'dance':
+        soundFile = './assets/sounds/dance.wav';
+        break;
+      case 'boom':
+        soundFile = './assets/sounds/boom.wav';
+        break;
+      case 'boxing':
+        soundFile = './assets/sounds/boxing.wav';
+        break;
+      case 'dead':
+        soundFile = './assets/sounds/dead.wav';
+        break;
+      case 'skill':
+        soundFile = './assets/sounds/skill.wav';
+        break;
+    }
+    
+    if (soundFile) {
+      audioLoader.load(soundFile, (buffer) => {
+        sound.setBuffer(buffer);
+        sound.setVolume(0.5);
+        sound.play();
+        
+        // Remove the temporary object after the sound finishes
+        setTimeout(() => {
+          this.scene.remove(soundSource);
+        }, buffer.duration * 1000 + 100);
+      }, undefined, (error) => {
+        console.warn(`Could not load sound ${soundFile}:`, error);
+        console.warn('Sound file may not exist yet. You can add custom sounds to assets/sounds/');
+        this.scene.remove(soundSource);
+      });
+    } else {
+      this.scene.remove(soundSource);
+    }
+  }
+  
   update(delta) {
     // Smooth interpolation for remote players
     this.remotePlayers.forEach((player) => {
@@ -343,6 +466,7 @@ export class MultiplayerClient {
           const targetAnim = player.animations[player.currentAnimation];
           if (targetAnim && player.currentAction !== targetAnim) {
             // Fade to new animation
+            console.log(`Switching remote player animation to: ${player.currentAnimation}`);
             if (player.currentAction) {
               player.currentAction.fadeOut(0.3);
             }

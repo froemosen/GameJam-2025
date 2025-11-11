@@ -136,6 +136,14 @@ wss.on('connection', (ws) => {
             animation: data.animation
           }));
         }
+      } else if (data.type === 'sound') {
+        // Broadcast sound to other players
+        broadcast(ws, JSON.stringify({
+          type: 'sound',
+          id: playerId,
+          soundType: data.soundType,
+          position: data.position
+        }));
       }
     } catch (error) {
       console.error('Error parsing message:', error);

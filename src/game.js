@@ -765,8 +765,26 @@ Promise.all([
   }),
   new Promise((resolve, reject) => {
     loader.load('./assets/mohamed/Animation_Run_03_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Agree_Gesture_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_All_Night_Dance_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Boom_Dance_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Boxing_Practice_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Dead_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Skill_01_withSkin.glb', resolve, undefined, reject);
   })
-]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf]) => {
+]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf, agreeGltf, danceGltf, boomGltf, boxingGltf, deadGltf, skillGltf]) => {
   mohamedModel = characterGltf.scene;
   mohamedModel.traverse((node) => {
     if (node.isMesh) {
@@ -785,6 +803,12 @@ Promise.all([
   animations.walk = mixer.clipAction(walkGltf.animations[0]);
   animations.run = mixer.clipAction(runGltf.animations[0]);
   animations.swim = mixer.clipAction(swimGltf.animations[0]);
+  animations.agree = mixer.clipAction(agreeGltf.animations[0]);
+  animations.dance = mixer.clipAction(danceGltf.animations[0]);
+  animations.boom = mixer.clipAction(boomGltf.animations[0]);
+  animations.boxing = mixer.clipAction(boxingGltf.animations[0]);
+  animations.dead = mixer.clipAction(deadGltf.animations[0]);
+  animations.skill = mixer.clipAction(skillGltf.animations[0]);
   
   // Start with idle
   animations.idle.play();
@@ -1486,6 +1510,60 @@ function onKeyDown(e) {
         console.log('Cinema mode disabled - pointer locked');
       }
       break;
+    case 'KeyF':
+      // Agree gesture animation
+      if (animations.agree) {
+        fadeToAction(animations.agree);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('agree');
+        }
+      }
+      break;
+    case 'KeyG':
+      // All night dance animation
+      if (animations.dance) {
+        fadeToAction(animations.dance);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('dance');
+        }
+      }
+      break;
+    case 'KeyH':
+      // Boom dance animation
+      if (animations.boom) {
+        fadeToAction(animations.boom);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('boom');
+        }
+      }
+      break;
+    case 'KeyJ':
+      // Boxing practice animation
+      if (animations.boxing) {
+        fadeToAction(animations.boxing);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('boxing');
+        }
+      }
+      break;
+    case 'KeyK':
+      // Dead animation
+      if (animations.dead) {
+        fadeToAction(animations.dead);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('dead');
+        }
+      }
+      break;
+    case 'KeyL':
+      // Skill animation
+      if (animations.skill) {
+        fadeToAction(animations.skill);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('skill');
+        }
+      }
+      break;
   }
 }
 function onKeyUp(e) {
@@ -2044,6 +2122,18 @@ function animate() {
         currentAnimationState = 'run';
       } else if (currentAction === animations.swim) {
         currentAnimationState = 'swim';
+      } else if (currentAction === animations.agree) {
+        currentAnimationState = 'agree';
+      } else if (currentAction === animations.dance) {
+        currentAnimationState = 'dance';
+      } else if (currentAction === animations.boom) {
+        currentAnimationState = 'boom';
+      } else if (currentAction === animations.boxing) {
+        currentAnimationState = 'boxing';
+      } else if (currentAction === animations.dead) {
+        currentAnimationState = 'dead';
+      } else if (currentAction === animations.skill) {
+        currentAnimationState = 'skill';
       }
       multiplayerClient.setCurrentAnimation(currentAnimationState);
     }
