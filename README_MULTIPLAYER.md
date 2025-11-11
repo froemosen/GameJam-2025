@@ -23,23 +23,23 @@ This branch adds multiplayer functionality and optimized terrain generation to t
 
 ### Prerequisites
 - Node.js (v14 or higher)
-- npm or yarn
+- pnpm (v8.0.0 or higher)
 
 ### Setup
 
 1. Install dependencies:
 ```bash
-npm install
+pnpm install
 ```
 
 2. Start the server:
 ```bash
-npm start
+pnpm start
 ```
 
 Or for development with auto-reload:
 ```bash
-npm run dev
+pnpm dev
 ```
 
 3. Open your browser to:
