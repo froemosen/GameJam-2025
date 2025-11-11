@@ -34,6 +34,7 @@ const UPDATE_RATE = 50; // 20 updates per second
 class Player {
   constructor(id) {
     this.id = id;
+    this.username = null;
     this.position = { x: 0, y: 7.45, z: 0 };
     this.rotation = { y: 0 };
     this.animation = 'idle';
@@ -87,7 +88,20 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message);
       
-      if (data.type === 'update') {
+      if (data.type === 'setUsername') {
+        // Set player username
+        const player = players.get(playerId);
+        if (player) {
+          player.username = data.username;
+          console.log(`Player ${playerId} set username to: ${data.username}`);
+          
+          // Notify others about username update
+          broadcast(ws, JSON.stringify({
+            type: 'playerJoined',
+            player: player
+          }));
+        }
+      } else if (data.type === 'update') {
         // Update player state
         const player = players.get(playerId);
         if (player) {

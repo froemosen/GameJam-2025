@@ -2061,9 +2061,21 @@ camera.lookAt(character.position);
 let multiplayerClient = null;
 let currentAnimationState = 'idle';
 
+// Prompt for username
+let username = localStorage.getItem('gameUsername');
+if (!username) {
+  username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
+  if (username && username.trim()) {
+    username = username.trim().substring(0, 20); // Limit to 20 chars
+    localStorage.setItem('gameUsername', username);
+  } else {
+    username = 'Player' + Math.floor(Math.random() * 1000);
+  }
+}
+
 try {
-  multiplayerClient = new MultiplayerClient(scene, camera, character);
-  console.log('Multiplayer MMO client initialized!');
+  multiplayerClient = new MultiplayerClient(scene, camera, character, username);
+  console.log('Multiplayer MMO client initialized with username:', username);
   
   // Add player count display
   const playerCountEl = document.createElement('div');

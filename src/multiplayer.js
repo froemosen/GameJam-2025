@@ -2,10 +2,11 @@
 // Handles connection, player synchronization, and network updates
 
 export class MultiplayerClient {
-  constructor(scene, camera, localPlayer) {
+  constructor(scene, camera, localPlayer, username = null) {
     this.scene = scene;
     this.camera = camera;
     this.localPlayer = localPlayer;
+    this.username = username || 'Player' + Math.floor(Math.random() * 1000);
     this.ws = null;
     this.playerId = null;
     this.remotePlayers = new Map();
@@ -29,6 +30,13 @@ export class MultiplayerClient {
       this.ws.onopen = () => {
         console.log('Connected to MMO server!');
         this.reconnectAttempts = 0;
+        
+        // Send username to server
+        this.ws.send(JSON.stringify({
+          type: 'setUsername',
+          username: this.username
+        }));
+        
         this.startUpdateLoop();
       };
       
@@ -124,8 +132,9 @@ export class MultiplayerClient {
     tempMesh.receiveShadow = true;
     playerGroup.add(tempMesh);
     
-    // Add name tag
-    const nameTag = this.createNameTag(playerData.id);
+    // Add name tag (use username if available, otherwise use ID)
+    const playerName = playerData.username || playerData.id.substring(0, 8);
+    const nameTag = this.createNameTag(playerName);
     nameTag.position.y = 3;
     playerGroup.add(nameTag);
     
@@ -214,7 +223,7 @@ export class MultiplayerClient {
     });
   }
   
-  createNameTag(playerId) {
+  createNameTag(playerName) {
     const THREE = window.THREE;
     
     // Create canvas for name
@@ -230,7 +239,7 @@ export class MultiplayerClient {
     ctx.font = 'bold 32px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(playerId.substring(0, 6), canvas.width / 2, canvas.height / 2);
+    ctx.fillText(playerName, canvas.width / 2, canvas.height / 2);
     
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture });
