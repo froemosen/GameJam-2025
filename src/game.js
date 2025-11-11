@@ -9,6 +9,11 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
+import { MultiplayerClient } from './multiplayer.js';
+import { OptimizedTerrain } from './terrain.js';
+
+// Make THREE globally available for multiplayer module
+window.THREE = THREE;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
@@ -2011,6 +2016,25 @@ function animate() {
     coordsElement.textContent = `Position: X: ${character.position.x.toFixed(1)}, Y: ${character.position.y.toFixed(1)}, Z: ${character.position.z.toFixed(1)}`;
   }
 
+  // Update multiplayer
+  if (multiplayerClient) {
+    multiplayerClient.update(delta);
+    
+    // Update current animation state for multiplayer
+    if (currentAction) {
+      if (currentAction === animations.idle) {
+        currentAnimationState = 'idle';
+      } else if (currentAction === animations.walk) {
+        currentAnimationState = 'walk';
+      } else if (currentAction === animations.run) {
+        currentAnimationState = 'run';
+      } else if (currentAction === animations.swim) {
+        currentAnimationState = 'swim';
+      }
+      multiplayerClient.setCurrentAnimation(currentAnimationState);
+    }
+  }
+
   renderer.render(scene, camera);
   cssRenderer.render(scene, camera); // Render CSS3D layer
 }
@@ -2031,6 +2055,41 @@ camera.position.set(
   character.position.z + Math.cos(cameraYaw) * distance
 );
 camera.lookAt(character.position);
+
+// Initialize multiplayer client
+let multiplayerClient = null;
+let currentAnimationState = 'idle';
+
+try {
+  multiplayerClient = new MultiplayerClient(scene, camera, character);
+  console.log('Multiplayer MMO client initialized!');
+  
+  // Add player count display
+  const playerCountEl = document.createElement('div');
+  playerCountEl.id = 'player-count';
+  playerCountEl.style.position = 'fixed';
+  playerCountEl.style.top = '10px';
+  playerCountEl.style.left = '10px';
+  playerCountEl.style.padding = '10px';
+  playerCountEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  playerCountEl.style.color = 'white';
+  playerCountEl.style.fontFamily = 'Arial, sans-serif';
+  playerCountEl.style.fontSize = '14px';
+  playerCountEl.style.borderRadius = '5px';
+  playerCountEl.style.zIndex = '1000';
+  playerCountEl.textContent = 'Players: 1';
+  document.body.appendChild(playerCountEl);
+  
+  // Update player count every second
+  setInterval(() => {
+    if (multiplayerClient) {
+      playerCountEl.textContent = `Players: ${multiplayerClient.getPlayerCount()}`;
+    }
+  }, 1000);
+} catch (error) {
+  console.error('Failed to initialize multiplayer:', error);
+  console.log('Running in single-player mode');
+}
 
 // Start animation loop (theme music will start on first user click)
 animate();
