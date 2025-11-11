@@ -169,16 +169,88 @@ export class MultiplayerClient {
     this.loadMohamedForPlayer(playerData.id, playerState);
   }
   
+  setupRemotePlayerFromCache(playerId, playerState, cache) {
+    const THREE = window.THREE;
+    
+    // Check if player still exists
+    if (!this.remotePlayers.has(playerId)) {
+      return;
+    }
+    
+    // Clone the character model from cache
+    const mohamedModel = cache.character.scene.clone();
+    mohamedModel.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    
+    // Remove temp box placeholder
+    playerState.group.remove(playerState.mesh);
+    
+    // Add Mohamed model
+    playerState.group.add(mohamedModel);
+    playerState.mesh = mohamedModel;
+    
+    // Setup animation mixer with cached animations
+    playerState.mixer = new THREE.AnimationMixer(mohamedModel);
+    playerState.animations.idle = playerState.mixer.clipAction(cache.idle.animations[0]);
+    playerState.animations.walk = playerState.mixer.clipAction(cache.walk.animations[0]);
+    playerState.animations.run = playerState.mixer.clipAction(cache.run.animations[0]);
+    playerState.animations.swim = playerState.mixer.clipAction(cache.swim.animations[0]);
+    
+    // Special animations - set to play once (not loop)
+    playerState.animations.agree = playerState.mixer.clipAction(cache.agree.animations[0]);
+    playerState.animations.agree.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.agree.clampWhenFinished = true;
+    
+    playerState.animations.dance = playerState.mixer.clipAction(cache.dance.animations[0]);
+    playerState.animations.dance.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.dance.clampWhenFinished = true;
+    
+    playerState.animations.boom = playerState.mixer.clipAction(cache.boom.animations[0]);
+    playerState.animations.boom.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.boom.clampWhenFinished = true;
+    
+    playerState.animations.boxing = playerState.mixer.clipAction(cache.boxing.animations[0]);
+    playerState.animations.boxing.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.boxing.clampWhenFinished = true;
+    
+    playerState.animations.dead = playerState.mixer.clipAction(cache.dead.animations[0]);
+    playerState.animations.dead.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.dead.clampWhenFinished = true;
+    
+    playerState.animations.skill = playerState.mixer.clipAction(cache.skill.animations[0]);
+    playerState.animations.skill.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.skill.clampWhenFinished = true;
+    
+    // Start with idle animation
+    playerState.animations.idle.play();
+    playerState.currentAction = playerState.animations.idle;
+    
+    console.log(`Remote player ${playerId} setup complete using cached animations (FAST)`);
+  }
+  
   loadMohamedForPlayer(playerId, playerState) {
     const THREE = window.THREE;
     const GLTFLoader = window.GLTFLoader;
     const DRACOLoader = window.DRACOLoader;
     const MeshoptDecoder = window.MeshoptDecoder;
     
+    // Check if we have cached animations from local player
+    if (window.mohamedAnimationCache) {
+      console.log(`Using cached Mohamed model for remote player ${playerId}`);
+      this.setupRemotePlayerFromCache(playerId, playerState, window.mohamedAnimationCache);
+      return;
+    }
+    
     if (!GLTFLoader) {
       console.warn('GLTFLoader not available, using box placeholder');
       return;
     }
+    
+    console.log(`Loading Mohamed model for remote player ${playerId} (cache not available yet)`);
     
     const loader = new GLTFLoader();
     

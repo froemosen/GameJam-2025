@@ -141,19 +141,21 @@ loadingManager.onProgress = function(url, itemsLoaded, itemsTotal) {
   const progress = (itemsLoaded / itemsTotal) * 100;
   loadingBar.style.width = progress + '%';
   loadingText.textContent = Math.round(progress) + '%';
-  console.log('Loading: ' + Math.round(progress) + '%');
+  
+  // Show what's currently loading
+  const filename = url.split('/').pop();
+  if (filename) {
+    loadingText.textContent = `${Math.round(progress)}% - ${filename}`;
+  }
 };
 
 loadingManager.onLoad = function() {
-  console.log('All assets loaded!');
-  // Fade out loading screen after a short delay
+  console.log('Critical assets loaded! Starting game...');
+  // Remove loading screen immediately for faster game start
+  loadingScreen.classList.add('fade-out');
   setTimeout(() => {
-    loadingScreen.classList.add('fade-out');
-    // Remove from DOM after fade completes
-    setTimeout(() => {
-      loadingScreen.style.display = 'none';
-    }, 500);
-  }, 500);
+    loadingScreen.style.display = 'none';
+  }, 300); // Reduced from 500ms
 };
 
 loadingManager.onError = function(url) {
@@ -594,6 +596,9 @@ let animations = {};
 let currentAction = null;
 let isPlayingSpecialAnimation = false; // Flag to prevent movement animations from interrupting special animations
 
+// Global cache for Mohamed animations to share with remote players
+window.mohamedAnimationCache = null;
+
 // Audio setup
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
@@ -753,6 +758,11 @@ const loader = new CachedGLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 loader.setMeshoptDecoder(MeshoptDecoder);
 
+// Create a separate loader for background assets (not tracked by loading manager)
+const backgroundLoader = new CachedGLTFLoader(new THREE.LoadingManager());
+backgroundLoader.setDRACOLoader(dracoLoader);
+backgroundLoader.setMeshoptDecoder(MeshoptDecoder);
+
 // Load the character model and animations
 Promise.all([
   new Promise((resolve, reject) => {
@@ -837,12 +847,27 @@ Promise.all([
   animations.idle.play();
   currentAction = animations.idle;
   
+  // Cache the loaded GLTF animations globally for remote players to reuse
+  window.mohamedAnimationCache = {
+    character: characterGltf,
+    idle: idleGltf,
+    walk: walkGltf,
+    run: runGltf,
+    swim: swimGltf,
+    agree: agreeGltf,
+    dance: danceGltf,
+    boom: boomGltf,
+    boxing: boxingGltf,
+    dead: deadGltf,
+    skill: skillGltf
+  };
+  
   // Update multiplayer client with Mohamed model for rotation sync
   if (multiplayerClient) {
     multiplayerClient.setMohamedModel(mohamedModel);
   }
   
-  console.log('Mohamed loaded with animations!');
+  console.log('Mohamed loaded with animations and cached for remote players!');
 }).catch(err => {
   console.error('Error loading Mohamed:', err);
   console.error('Error details:', {
@@ -1092,8 +1117,8 @@ function optimizeModel(model) {
   console.log(`Optimized model: ${meshCount} meshes, ${totalVertices} vertices total`);
 }
 
-// Load Boris Johnson inside the venue
-loader.load('./assets/boris.glb', (borisGltf) => {
+// Load Boris Johnson inside the venue (background loading - doesn't block game start)
+backgroundLoader.load('./assets/boris.glb', (borisGltf) => {
   borisModel = borisGltf.scene;
   
   // Scale Boris
@@ -1154,8 +1179,8 @@ loader.load('./assets/boris.glb', (borisGltf) => {
   console.error('Error loading Boris Johnson:', err);
 });
 
-// Load Castle of Loarre in the background
-loader.load('./assets/castle_of_loarre.glb', (gltf) => {
+// Load Castle of Loarre in the background (background loading - doesn't block game start)
+backgroundLoader.load('./assets/castle_of_loarre.glb', (gltf) => {
   const castleModel = gltf.scene;
   
   // Scale the castle appropriately
