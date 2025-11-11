@@ -77,11 +77,7 @@ wss.on('connection', (ws) => {
     players: Array.from(players.values()).filter(p => p.id !== playerId)
   }));
   
-  // Notify others about new player
-  broadcast(ws, JSON.stringify({
-    type: 'playerJoined',
-    player: player
-  }));
+  // Don't broadcast playerJoined yet - wait for username first
   
   // Handle messages from client
   ws.on('message', (message) => {
@@ -95,11 +91,10 @@ wss.on('connection', (ws) => {
           player.username = data.username;
           console.log(`Player ${playerId} set username to: ${data.username}`);
           
-          // Notify others about username update
+          // Now broadcast playerJoined with the full player info including username
           broadcast(ws, JSON.stringify({
-            type: 'usernameUpdate',
-            id: playerId,
-            username: data.username
+            type: 'playerJoined',
+            player: player
           }));
         }
       } else if (data.type === 'update') {

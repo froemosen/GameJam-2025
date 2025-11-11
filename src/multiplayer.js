@@ -99,11 +99,6 @@ export class MultiplayerClient {
       case 'playerUpdate':
         this.updateRemotePlayer(data);
         break;
-        
-      case 'usernameUpdate':
-        console.log('Player username updated:', data.id, data.username);
-        this.updatePlayerUsername(data.id, data.username);
-        break;
     }
   }
   
@@ -288,24 +283,6 @@ export class MultiplayerClient {
       player.targetPosition = data.position;
       player.targetRotation = data.rotation;
       player.currentAnimation = data.animation;
-    }
-  }
-  
-  updatePlayerUsername(playerId, username) {
-    const player = this.remotePlayers.get(playerId);
-    if (player) {
-      // Find and remove old name tag (it's the last child)
-      const nameTag = player.group.children[player.group.children.length - 1];
-      if (nameTag && nameTag.isSprite) {
-        player.group.remove(nameTag);
-      }
-      
-      // Add new name tag with updated username
-      const newNameTag = this.createNameTag(username);
-      newNameTag.position.y = 3;
-      player.group.add(newNameTag);
-      
-      console.log(`Updated name tag for player ${playerId} to ${username}`);
     }
   }
   
