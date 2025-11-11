@@ -38,6 +38,7 @@ type Player struct {
 	Conn          *websocket.Conn    `json:"-"`
 	Disconnected  bool               `json:"-"`
 	mu            sync.RWMutex       `json:"-"`
+	writeMu       sync.Mutex         `json:"-"` // Protects writes to Conn
 }
 
 // Thread-safe session structure
@@ -166,7 +167,9 @@ func broadcastToSession(sessionID string, message []byte, excludePlayerID string
 				p.mu.RUnlock()
 
 				if conn != nil {
+					p.writeMu.Lock()
 					err := conn.WriteMessage(websocket.TextMessage, message)
+					p.writeMu.Unlock()
 					if err != nil {
 						log.Printf("Error broadcasting to player %s: %v", p.ID, err)
 					}
@@ -196,7 +199,9 @@ func broadcastToAll(message []byte) {
 			p.mu.RUnlock()
 
 			if conn != nil {
+				p.writeMu.Lock()
 				err := conn.WriteMessage(websocket.TextMessage, message)
+				p.writeMu.Unlock()
 				if err != nil {
 					log.Printf("Error broadcasting to player %s: %v", p.ID, err)
 				}
@@ -299,11 +304,11 @@ func handlePlayerMessages(player *Player) {
 
 		case <-ticker.C:
 			// Send ping
-			player.mu.Lock()
-			conn := player.Conn
-			player.mu.Unlock()
+			player.writeMu.Lock()
+			err := player.Conn.WriteMessage(websocket.PingMessage, nil)
+			player.writeMu.Unlock()
 
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err != nil {
 				// Only log if it's not a "connection closed" error
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					log.Printf("Player %s ping failed: %v", player.ID, err)
@@ -353,11 +358,9 @@ func handleListSessions(player *Player) {
 		"sessions": sessions,
 	})
 
-	player.mu.RLock()
-	conn := player.Conn
-	player.mu.RUnlock()
-
-	conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Lock()
+	player.Conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Unlock()
 }
 
 // Handle create session request
@@ -385,11 +388,9 @@ func handleCreateSession(player *Player, msg *Message) {
 		SessionName: msg.SessionName,
 	})
 
-	player.mu.RLock()
-	conn := player.Conn
-	player.mu.RUnlock()
-
-	conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Lock()
+	player.Conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Unlock()
 }
 
 // Handle join session request
@@ -403,10 +404,9 @@ func handleJoinSession(player *Player, msg *Message) {
 			Type:    "error",
 			Message: "Session not found. Please check the ID and try again.",
 		})
-		player.mu.RLock()
-		conn := player.Conn
-		player.mu.RUnlock()
-		conn.WriteMessage(websocket.TextMessage, response)
+		player.writeMu.Lock()
+		player.Conn.WriteMessage(websocket.TextMessage, response)
+		player.writeMu.Unlock()
 		return
 	}
 
@@ -448,11 +448,9 @@ func handleJoinSession(player *Player, msg *Message) {
 		Players:   existingPlayers,
 	})
 
-	player.mu.RLock()
-	conn := player.Conn
-	player.mu.RUnlock()
-
-	conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Lock()
+	player.Conn.WriteMessage(websocket.TextMessage, response)
+	player.writeMu.Unlock()
 }
 
 // Handle set username
