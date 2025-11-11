@@ -231,46 +231,81 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	state.players[playerID] = player
 	state.mu.Unlock()
 
-	// Handle messages from this client
-	go handlePlayerMessages(player)
+	// Set up pong handler to update last activity
+	conn.SetPongHandler(func(string) error {
+		player.mu.Lock()
+		player.LastUpdate = time.Now()
+		player.mu.Unlock()
+		return nil
+	})
 
-	// Keep connection alive and handle cleanup
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	// Set read deadline
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-	for {
-		select {
-		case <-ticker.C:
-			// Send ping to keep connection alive
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("Player %s ping failed: %v", playerID, err)
-				handleDisconnect(player)
-				return
-			}
-		}
-	}
+	// Handle messages from this client (blocking call)
+	handlePlayerMessages(player)
 }
 
 // Handle messages from a player
 func handlePlayerMessages(player *Player) {
 	defer handleDisconnect(player)
 
+	// Start ping ticker
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Channel to signal message read
+	messageChan := make(chan []byte, 10)
+	errorChan := make(chan error, 1)
+
+	// Read messages in a goroutine
+	go func() {
+		for {
+			_, messageData, err := player.Conn.ReadMessage()
+			if err != nil {
+				errorChan <- err
+				return
+			}
+			messageChan <- messageData
+		}
+	}()
+
 	for {
-		_, messageData, err := player.Conn.ReadMessage()
-		if err != nil {
+		select {
+		case messageData := <-messageChan:
+			// Reset read deadline on each message
+			player.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+			// Update last activity
+			player.mu.Lock()
+			player.LastUpdate = time.Now()
+			player.mu.Unlock()
+
+			var msg Message
+			if err := json.Unmarshal(messageData, &msg); err != nil {
+				log.Printf("Error parsing message from player %s: %v", player.ID, err)
+				continue
+			}
+
+			handleMessage(player, &msg)
+
+		case err := <-errorChan:
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("WebSocket error for player %s: %v", player.ID, err)
 			}
-			break
-		}
+			return
 
-		var msg Message
-		if err := json.Unmarshal(messageData, &msg); err != nil {
-			log.Printf("Error parsing message from player %s: %v", player.ID, err)
-			continue
-		}
+		case <-ticker.C:
+			// Send ping
+			player.mu.Lock()
+			conn := player.Conn
+			player.mu.Unlock()
 
-		handleMessage(player, &msg)
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("Player %s ping failed: %v", player.ID, err)
+				return
+			}
+		}
 	}
 }
 
