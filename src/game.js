@@ -10,15 +10,18 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 import { MultiplayerClient } from './multiplayer.js';
 import { OptimizedTerrain } from './terrain.js';
+import { MainMenu } from './mainMenu.js';
 
-// Make THREE, GLTFLoader, DRACOLoader and MeshoptDecoder globally available for multiplayer module
+// Make THREE, GLTFLoader, DRACOLoader, MeshoptDecoder and SkeletonUtils globally available for multiplayer module
 window.THREE = THREE;
 window.GLTFLoader = GLTFLoader;
 window.DRACOLoader = DRACOLoader;
 window.MeshoptDecoder = MeshoptDecoder;
+window.SkeletonUtils = SkeletonUtils;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
@@ -168,6 +171,9 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const container = document.getElementById('canvas-container');
+
+// Hide the game canvas initially (show when session starts)
+container.style.display = 'none';
 
 // Renderer with aggressive optimization
 const renderer = new THREE.WebGLRenderer({ 
@@ -902,6 +908,7 @@ let ocamlModel = null;
 
 // Castle meshes for BVH collision
 let venueMeshes = [];
+let castleMeshes = [];
 
 // Screenshot and iframe functionality
 let screenshotMesh = null;
@@ -1184,7 +1191,7 @@ backgroundLoader.load('./assets/castle_of_loarre.glb', (gltf) => {
   const castleModel = gltf.scene;
   
   // Scale the castle appropriately
-  castleModel.scale.set(20, 20, 20);
+  castleModel.scale.set(1, 1, 1);
   
   // Position castle in the distance (far from spawn area)
   castleModel.position.set(300, 7.45, 300);
@@ -1194,6 +1201,7 @@ backgroundLoader.load('./assets/castle_of_loarre.glb', (gltf) => {
     if (node.isMesh) {
       node.castShadow = true;
       node.receiveShadow = true;
+      castleMeshes.push(node);
     }
   });
   
@@ -1435,8 +1443,8 @@ function hideVenueIframe() {
     }
     isVenueIframeVisible = false;
     
-    // Only try to re-lock pointer on desktop (not mobile)
-    if (!('ontouchstart' in window)) {
+    // Only try to re-lock pointer on desktop (not mobile) and if game has started
+    if (!('ontouchstart' in window) && gameStarted) {
       renderer.domElement.requestPointerLock();
     }
     
@@ -1462,7 +1470,7 @@ let isCinemaMode = false;
 const clickRaycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// Request pointer lock on click
+// Request pointer lock on click (only when game has started)
 document.addEventListener('click', (event) => {
   if (isPointerLocked) {
     // Calculate mouse position in normalized device coordinates (-1 to +1)
@@ -1496,7 +1504,10 @@ document.addEventListener('click', (event) => {
     }
   }
   
-  renderer.domElement.requestPointerLock();
+  // Only request pointer lock if the game has started
+  if (gameStarted) {
+    renderer.domElement.requestPointerLock();
+  }
 });
 
 // Track pointer lock state
@@ -1535,13 +1546,23 @@ let velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 
 function onKeyDown(e) {
-  // Check for Escape key to close venue iframe
-  if (e.code === 'Escape' && isVenueIframeVisible) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideVenueIframe();
-    console.log('Escape pressed - closing iframe');
-    return;
+  // Check for Escape key to close venue iframe or return to menu
+  if (e.code === 'Escape') {
+    if (isVenueIframeVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideVenueIframe();
+      console.log('Escape pressed - closing iframe');
+      return;
+    } else if (gameStarted) {
+      // Return to main menu
+      e.preventDefault();
+      e.stopPropagation();
+      if (confirm('Return to main menu? (You will leave the current session)')) {
+        location.reload();
+      }
+      return;
+    }
   }
 
   if (isVenueIframeVisible) return
@@ -1583,7 +1604,9 @@ function onKeyDown(e) {
         // Re-lock pointer and disable cinema interaction
         isCinemaMode = false;
         cssRenderer.domElement.style.pointerEvents = 'none';
-        renderer.domElement.requestPointerLock();
+        if (gameStarted) {
+          renderer.domElement.requestPointerLock();
+        }
         console.log('Cinema mode disabled - pointer locked');
       }
       break;
@@ -1997,7 +2020,7 @@ function animate() {
     character.position.z += dz * speed * delta;
     
     // Check for horizontal collision with venue and OCaml
-    const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
+    const collidableMeshes = [...ocamlsMeshes, ...venueMeshes, ...castleMeshes];
     if (collidableMeshes.length > 0) {
       const horizontalRaycaster = new THREE.Raycaster();
       const playerHeight = 1.0; // Check at player's center height
@@ -2036,7 +2059,7 @@ function animate() {
   raycaster.set(rayOrigin, rayDirection);
   
   // Combine all collidable meshes
-  const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
+  const collidableMeshes = [...ocamlsMeshes, ...venueMeshes, ...castleMeshes];
   
   if (collidableMeshes.length > 0) {
     // Check intersection with all meshes
@@ -2256,58 +2279,74 @@ camera.lookAt(character.position);
 // Initialize multiplayer client
 let multiplayerClient = null;
 let currentAnimationState = 'idle';
+let gameStarted = false; // Flag to prevent pointer lock until game starts
 
-// Prompt for username
-let username = localStorage.getItem('gameUsername');
-console.log('Username from localStorage:', username);
-if (!username) {
-  username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
-  if (username && username.trim()) {
-    username = username.trim().substring(0, 20); // Limit to 20 chars
-    localStorage.setItem('gameUsername', username);
-    console.log('Saved new username to localStorage:', username);
-  } else {
-    username = 'Player' + Math.floor(Math.random() * 1000);
-    console.log('Generated random username:', username);
-  }
-} else {
-  console.log('Using existing username from localStorage:', username);
-}
-
-try {
-  console.log('Creating MultiplayerClient with username:', username);
-  multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel);
-  console.log('Multiplayer MMO client initialized with username:', username);
+// Function to start the game with a session ID
+function startGameWithSession(sessionId) {
+  console.log('Starting game with session ID:', sessionId);
   
-  // Add player count display
-  const playerCountEl = document.createElement('div');
-  playerCountEl.id = 'player-count';
-  playerCountEl.style.position = 'fixed';
-  playerCountEl.style.top = '10px';
-  playerCountEl.style.left = '10px';
-  playerCountEl.style.padding = '10px';
-  playerCountEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  playerCountEl.style.color = 'white';
-  playerCountEl.style.fontFamily = 'Arial, sans-serif';
-  playerCountEl.style.fontSize = '14px';
-  playerCountEl.style.borderRadius = '5px';
-  playerCountEl.style.zIndex = '1000';
-  playerCountEl.textContent = 'Players: 1';
-  document.body.appendChild(playerCountEl);
+  // Enable pointer lock and show the game canvas
+  gameStarted = true;
+  container.style.display = 'block';
   
-  // Update player count every second
-  setInterval(() => {
-    if (multiplayerClient) {
-      playerCountEl.textContent = `Players: ${multiplayerClient.getPlayerCount()}`;
+  // Prompt for username
+  let username = localStorage.getItem('gameUsername');
+  console.log('Username from localStorage:', username);
+  if (!username) {
+    username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
+    if (username && username.trim()) {
+      username = username.trim().substring(0, 20); // Limit to 20 chars
+      localStorage.setItem('gameUsername', username);
+      console.log('Saved new username to localStorage:', username);
+    } else {
+      username = 'Player' + Math.floor(Math.random() * 1000);
+      console.log('Generated random username:', username);
     }
-  }, 1000);
-} catch (error) {
-  console.error('Failed to initialize multiplayer:', error);
-  console.log('Running in single-player mode');
+  } else {
+    console.log('Using existing username from localStorage:', username);
+  }
+
+  try {
+    console.log('Creating MultiplayerClient with username:', username, 'and session:', sessionId);
+    multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel, sessionId);
+    console.log('Multiplayer MMO client initialized with username:', username);
+    
+    // Add player count display (bottom left)
+    const playerCountEl = document.createElement('div');
+    playerCountEl.id = 'player-count';
+    playerCountEl.style.position = 'fixed';
+    playerCountEl.style.bottom = '10px';
+    playerCountEl.style.left = '10px';
+    playerCountEl.style.padding = '10px';
+    playerCountEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    playerCountEl.style.color = 'white';
+    playerCountEl.style.fontFamily = 'Arial, sans-serif';
+    playerCountEl.style.fontSize = '14px';
+    playerCountEl.style.borderRadius = '5px';
+    playerCountEl.style.zIndex = '1000';
+    playerCountEl.textContent = 'Players: 1';
+    document.body.appendChild(playerCountEl);
+    
+    // Update player count every second
+    setInterval(() => {
+      if (multiplayerClient) {
+        playerCountEl.textContent = `Players: ${multiplayerClient.getPlayerCount()}`;
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Failed to initialize multiplayer:', error);
+    console.log('Running in single-player mode');
+  }
+
+  // Start animation loop (theme music will start on first user click)
+  animate();
 }
 
-// Start animation loop (theme music will start on first user click)
-animate();
+// Initialize main menu instead of starting game directly
+console.log('Initializing main menu...');
+const mainMenu = new MainMenu(startGameWithSession);
+window.mainMenu = mainMenu; // Expose to window for onclick handlers
+console.log('Main menu initialized, waiting for user to select/create session');
 
 
 function makeOcaml(x, y, z, size) {

@@ -2,12 +2,13 @@
 // Handles connection, player synchronization, and network updates
 
 export class MultiplayerClient {
-  constructor(scene, camera, localPlayer, username = null, mohamedModel = null) {
+  constructor(scene, camera, localPlayer, username = null, mohamedModel = null, sessionId = null) {
     this.scene = scene;
     this.camera = camera;
     this.localPlayer = localPlayer;
     this.mohamedModel = mohamedModel;
     this.username = username || 'Player' + Math.floor(Math.random() * 1000);
+    this.sessionId = sessionId; // Game session ID for isolated multiplayer rooms
     this.ws = null;
     this.playerId = null;
     this.remotePlayers = new Map();
@@ -35,15 +36,26 @@ export class MultiplayerClient {
       this.ws.onopen = () => {
         console.log('Connected to MMO server!');
         console.log('My username is:', this.username);
+        console.log('My session ID is:', this.sessionId);
         this.reconnectAttempts = 0;
         
-        // Send username to server
-        const usernameMessage = {
-          type: 'setUsername',
-          username: this.username
+        // Send session join request to server
+        const joinMessage = {
+          type: 'joinSession',
+          sessionId: this.sessionId
         };
-        console.log('Sending username to server:', usernameMessage);
-        this.ws.send(JSON.stringify(usernameMessage));
+        console.log('Joining session:', joinMessage);
+        this.ws.send(JSON.stringify(joinMessage));
+        
+        // Send username to server after a short delay to ensure session join is processed first
+        setTimeout(() => {
+          const usernameMessage = {
+            type: 'setUsername',
+            username: this.username
+          };
+          console.log('Sending username to server:', usernameMessage);
+          this.ws.send(JSON.stringify(usernameMessage));
+        }, 100);
         
         this.startUpdateLoop();
       };
@@ -94,6 +106,20 @@ export class MultiplayerClient {
         });
         break;
         
+      case 'sessionJoined':
+        // Handle session join response
+        this.playerId = data.playerId;
+        console.log('Joined session:', data.sessionId, 'with player ID:', this.playerId);
+        
+        // Add existing players in the session
+        if (data.players && data.players.length > 0) {
+          console.log('Adding', data.players.length, 'existing players');
+          data.players.forEach(playerData => {
+            this.addRemotePlayer(playerData);
+          });
+        }
+        break;
+        
       case 'playerJoined':
         console.log('Player joined:', data.player.id);
         this.addRemotePlayer(data.player);
@@ -116,8 +142,11 @@ export class MultiplayerClient {
   
   addRemotePlayer(playerData) {
     if (this.remotePlayers.has(playerData.id)) {
+      console.log(`Remote player ${playerData.id} already exists, skipping`);
       return; // Player already exists
     }
+    
+    console.log(`Adding remote player ${playerData.id} (${playerData.username || 'no name'})`);
     
     // Import THREE from global scope
     const THREE = window.THREE;
@@ -171,14 +200,20 @@ export class MultiplayerClient {
   
   setupRemotePlayerFromCache(playerId, playerState, cache) {
     const THREE = window.THREE;
+    const SkeletonUtils = window.SkeletonUtils;
+    
+    console.log(`Setting up remote player ${playerId} from cache...`);
     
     // Check if player still exists
     if (!this.remotePlayers.has(playerId)) {
+      console.warn(`Player ${playerId} no longer exists, aborting setup`);
       return;
     }
     
-    // Clone the character model from cache
-    const mohamedModel = cache.character.scene.clone();
+    // Clone the character model from cache using SkeletonUtils for proper skinned mesh cloning
+    const mohamedModel = SkeletonUtils.clone(cache.character.scene);
+    console.log(`Cloned Mohamed model for player ${playerId}`);
+    
     mohamedModel.traverse((node) => {
       if (node.isMesh) {
         node.castShadow = true;
@@ -187,11 +222,15 @@ export class MultiplayerClient {
     });
     
     // Remove temp box placeholder
-    playerState.group.remove(playerState.mesh);
+    if (playerState.mesh) {
+      playerState.group.remove(playerState.mesh);
+      console.log(`Removed placeholder for player ${playerId}`);
+    }
     
     // Add Mohamed model
     playerState.group.add(mohamedModel);
     playerState.mesh = mohamedModel;
+    console.log(`Added Mohamed model to player ${playerId} group`);
     
     // Setup animation mixer with cached animations
     playerState.mixer = new THREE.AnimationMixer(mohamedModel);
@@ -240,17 +279,17 @@ export class MultiplayerClient {
     
     // Check if we have cached animations from local player
     if (window.mohamedAnimationCache) {
-      console.log(`Using cached Mohamed model for remote player ${playerId}`);
+      console.log(`✅ Using cached Mohamed model for remote player ${playerId}`);
       this.setupRemotePlayerFromCache(playerId, playerState, window.mohamedAnimationCache);
       return;
     }
     
     if (!GLTFLoader) {
-      console.warn('GLTFLoader not available, using box placeholder');
+      console.warn('❌ GLTFLoader not available, using box placeholder');
       return;
     }
     
-    console.log(`Loading Mohamed model for remote player ${playerId} (cache not available yet)`);
+    console.warn(`⚠️ Cache not available yet, loading Mohamed model from scratch for remote player ${playerId}`);
     
     const loader = new GLTFLoader();
     
