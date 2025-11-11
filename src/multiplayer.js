@@ -2,10 +2,11 @@
 // Handles connection, player synchronization, and network updates
 
 export class MultiplayerClient {
-  constructor(scene, camera, localPlayer, username = null) {
+  constructor(scene, camera, localPlayer, username = null, mohamedModel = null) {
     this.scene = scene;
     this.camera = camera;
     this.localPlayer = localPlayer;
+    this.mohamedModel = mohamedModel;
     this.username = username || 'Player' + Math.floor(Math.random() * 1000);
     this.ws = null;
     this.playerId = null;
@@ -16,6 +17,10 @@ export class MultiplayerClient {
     this.reconnectDelay = 2000;
     
     this.connect();
+  }
+  
+  setMohamedModel(model) {
+    this.mohamedModel = model;
   }
   
   connect() {
@@ -152,6 +157,7 @@ export class MultiplayerClient {
       mesh: tempMesh,
       targetPosition: { ...playerData.position },
       targetRotation: { ...playerData.rotation },
+      targetModelRotation: playerData.modelRotation ? { ...playerData.modelRotation } : { y: 0 },
       currentAnimation: playerData.animation || 'idle',
       mixer: null,
       animations: {}
@@ -167,6 +173,7 @@ export class MultiplayerClient {
     const THREE = window.THREE;
     const GLTFLoader = window.GLTFLoader;
     const DRACOLoader = window.DRACOLoader;
+    const MeshoptDecoder = window.MeshoptDecoder;
     
     if (!GLTFLoader) {
       console.warn('GLTFLoader not available, using box placeholder');
@@ -181,6 +188,11 @@ export class MultiplayerClient {
       dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
       dracoLoader.setDecoderConfig({ type: 'js' });
       loader.setDRACOLoader(dracoLoader);
+    }
+    
+    // Setup Meshopt decoder if available
+    if (MeshoptDecoder) {
+      loader.setMeshoptDecoder(MeshoptDecoder);
     }
     
     // Load Mohamed model and animations for remote player
@@ -245,12 +257,31 @@ export class MultiplayerClient {
       playerState.animations.walk = playerState.mixer.clipAction(walkGltf.animations[0]);
       playerState.animations.run = playerState.mixer.clipAction(runGltf.animations[0]);
       playerState.animations.swim = playerState.mixer.clipAction(swimGltf.animations[0]);
+      
+      // Special animations - set to play once (not loop) - same as local player
       playerState.animations.agree = playerState.mixer.clipAction(agreeGltf.animations[0]);
+      playerState.animations.agree.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.agree.clampWhenFinished = true;
+      
       playerState.animations.dance = playerState.mixer.clipAction(danceGltf.animations[0]);
+      playerState.animations.dance.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.dance.clampWhenFinished = true;
+      
       playerState.animations.boom = playerState.mixer.clipAction(boomGltf.animations[0]);
+      playerState.animations.boom.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.boom.clampWhenFinished = true;
+      
       playerState.animations.boxing = playerState.mixer.clipAction(boxingGltf.animations[0]);
+      playerState.animations.boxing.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.boxing.clampWhenFinished = true;
+      
       playerState.animations.dead = playerState.mixer.clipAction(deadGltf.animations[0]);
+      playerState.animations.dead.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.dead.clampWhenFinished = true;
+      
       playerState.animations.skill = playerState.mixer.clipAction(skillGltf.animations[0]);
+      playerState.animations.skill.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.skill.clampWhenFinished = true;
       
       // Start with idle animation
       playerState.animations.idle.play();
@@ -313,6 +344,7 @@ export class MultiplayerClient {
       // Smooth interpolation target
       player.targetPosition = data.position;
       player.targetRotation = data.rotation;
+      player.targetModelRotation = data.modelRotation || { y: 0 };
       
       // Update animation if it changed
       if (player.currentAnimation !== data.animation) {
@@ -348,6 +380,9 @@ export class MultiplayerClient {
         rotation: {
           y: this.localPlayer.rotation.y
         },
+        modelRotation: this.mohamedModel ? {
+          y: this.mohamedModel.rotation.y
+        } : { y: 0 },
         animation: this.getCurrentAnimation()
       };
       
@@ -481,7 +516,7 @@ export class MultiplayerClient {
       player.group.position.y += (player.targetPosition.y - player.group.position.y) * 0.3;
       player.group.position.z += (player.targetPosition.z - player.group.position.z) * 0.3;
       
-      // Lerp rotation
+      // Lerp rotation (container)
       let targetY = player.targetRotation.y;
       let currentY = player.group.rotation.y;
       
@@ -491,6 +526,19 @@ export class MultiplayerClient {
       if (diff < -Math.PI) diff += Math.PI * 2;
       
       player.group.rotation.y += diff * 0.3;
+      
+      // Lerp Mohamed model rotation (the actual character facing direction)
+      if (player.mesh && player.mesh.rotation && player.targetModelRotation) {
+        let targetModelY = player.targetModelRotation.y;
+        let currentModelY = player.mesh.rotation.y;
+        
+        // Handle angle wrapping for model rotation
+        let modelDiff = targetModelY - currentModelY;
+        if (modelDiff > Math.PI) modelDiff -= Math.PI * 2;
+        if (modelDiff < -Math.PI) modelDiff += Math.PI * 2;
+        
+        player.mesh.rotation.y += modelDiff * 0.3;
+      }
       
       // Make name tag face camera (it's the last child after Mohamed model is loaded)
       const nameTag = player.group.children[player.group.children.length - 1];

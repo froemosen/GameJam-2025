@@ -8,15 +8,17 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 import { MultiplayerClient } from './multiplayer.js';
 import { OptimizedTerrain } from './terrain.js';
 
-// Make THREE, GLTFLoader and DRACOLoader globally available for multiplayer module
+// Make THREE, GLTFLoader, DRACOLoader and MeshoptDecoder globally available for multiplayer module
 window.THREE = THREE;
 window.GLTFLoader = GLTFLoader;
 window.DRACOLoader = DRACOLoader;
+window.MeshoptDecoder = MeshoptDecoder;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
@@ -590,6 +592,7 @@ let mohamedModel = null;
 let mixer = null;
 let animations = {};
 let currentAction = null;
+let isPlayingSpecialAnimation = false; // Flag to prevent movement animations from interrupting special animations
 
 // Audio setup
 const audioListener = new THREE.AudioListener();
@@ -748,6 +751,7 @@ dracoLoader.setDecoderConfig({ type: 'js' });
 
 const loader = new CachedGLTFLoader();
 loader.setDRACOLoader(dracoLoader);
+loader.setMeshoptDecoder(MeshoptDecoder);
 
 // Load the character model and animations
 Promise.all([
@@ -803,16 +807,40 @@ Promise.all([
   animations.walk = mixer.clipAction(walkGltf.animations[0]);
   animations.run = mixer.clipAction(runGltf.animations[0]);
   animations.swim = mixer.clipAction(swimGltf.animations[0]);
+  
+  // Special animations - set to play once (not loop)
   animations.agree = mixer.clipAction(agreeGltf.animations[0]);
+  animations.agree.setLoop(THREE.LoopOnce, 1);
+  animations.agree.clampWhenFinished = true;
+  
   animations.dance = mixer.clipAction(danceGltf.animations[0]);
+  animations.dance.setLoop(THREE.LoopOnce, 1);
+  animations.dance.clampWhenFinished = true;
+  
   animations.boom = mixer.clipAction(boomGltf.animations[0]);
+  animations.boom.setLoop(THREE.LoopOnce, 1);
+  animations.boom.clampWhenFinished = true;
+  
   animations.boxing = mixer.clipAction(boxingGltf.animations[0]);
+  animations.boxing.setLoop(THREE.LoopOnce, 1);
+  animations.boxing.clampWhenFinished = true;
+  
   animations.dead = mixer.clipAction(deadGltf.animations[0]);
+  animations.dead.setLoop(THREE.LoopOnce, 1);
+  animations.dead.clampWhenFinished = true;
+  
   animations.skill = mixer.clipAction(skillGltf.animations[0]);
+  animations.skill.setLoop(THREE.LoopOnce, 1);
+  animations.skill.clampWhenFinished = true;
   
   // Start with idle
   animations.idle.play();
   currentAction = animations.idle;
+  
+  // Update multiplayer client with Mohamed model for rotation sync
+  if (multiplayerClient) {
+    multiplayerClient.setMohamedModel(mohamedModel);
+  }
   
   console.log('Mohamed loaded with animations!');
 }).catch(err => {
@@ -1124,6 +1152,30 @@ loader.load('./assets/boris.glb', (borisGltf) => {
   console.log('Boris Johnson placed in venue at:', borisPosition);
 }, undefined, (err) => {
   console.error('Error loading Boris Johnson:', err);
+});
+
+// Load Castle of Loarre in the background
+loader.load('./assets/castle_of_loarre.glb', (gltf) => {
+  const castleModel = gltf.scene;
+  
+  // Scale the castle appropriately
+  castleModel.scale.set(20, 20, 20);
+  
+  // Position castle in the distance (far from spawn area)
+  castleModel.position.set(300, 7.45, 300);
+  
+  // Enable shadows
+  castleModel.traverse((node) => {
+    if (node.isMesh) {
+      node.castShadow = true;
+      node.receiveShadow = true;
+    }
+  });
+  
+  scene.add(castleModel);
+  console.log('Castle of Loarre placed in background at:', castleModel.position);
+}, undefined, (err) => {
+  console.error('Error loading Castle of Loarre:', err);
 });
 
 // Create cinema-style screen with iframe
@@ -1513,7 +1565,7 @@ function onKeyDown(e) {
     case 'KeyF':
       // Agree gesture animation
       if (animations.agree) {
-        fadeToAction(animations.agree);
+        fadeToAction(animations.agree, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('agree');
         }
@@ -1522,7 +1574,7 @@ function onKeyDown(e) {
     case 'KeyG':
       // All night dance animation
       if (animations.dance) {
-        fadeToAction(animations.dance);
+        fadeToAction(animations.dance, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('dance');
         }
@@ -1531,7 +1583,7 @@ function onKeyDown(e) {
     case 'KeyH':
       // Boom dance animation
       if (animations.boom) {
-        fadeToAction(animations.boom);
+        fadeToAction(animations.boom, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('boom');
         }
@@ -1540,7 +1592,7 @@ function onKeyDown(e) {
     case 'KeyJ':
       // Boxing practice animation
       if (animations.boxing) {
-        fadeToAction(animations.boxing);
+        fadeToAction(animations.boxing, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('boxing');
         }
@@ -1549,7 +1601,7 @@ function onKeyDown(e) {
     case 'KeyK':
       // Dead animation
       if (animations.dead) {
-        fadeToAction(animations.dead);
+        fadeToAction(animations.dead, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('dead');
         }
@@ -1558,7 +1610,7 @@ function onKeyDown(e) {
     case 'KeyL':
       // Skill animation
       if (animations.skill) {
-        fadeToAction(animations.skill);
+        fadeToAction(animations.skill, 0.3, true);
         if (multiplayerClient) {
           multiplayerClient.triggerSound('skill');
         }
@@ -1811,12 +1863,24 @@ const cameraOffset = new THREE.Vector3(0, 4, 6);
 const clock = new THREE.Clock();
 
 // Helper to smoothly transition between animations
-function fadeToAction(newAction, duration = 0.3) {
+function fadeToAction(newAction, duration = 0.3, isSpecial = false) {
   if (currentAction && currentAction !== newAction) {
     currentAction.fadeOut(duration);
   }
   newAction.reset().fadeIn(duration).play();
   currentAction = newAction;
+  
+  // If this is a special animation, set the flag and clear it when animation finishes
+  if (isSpecial) {
+    isPlayingSpecialAnimation = true;
+    
+    // Listen for animation to finish (not loop)
+    const onFinished = () => {
+      isPlayingSpecialAnimation = false;
+      mixer.removeEventListener('finished', onFinished);
+    };
+    mixer.addEventListener('finished', onFinished);
+  }
 }
 
 let desiredCamPos = null
@@ -1987,29 +2051,31 @@ function animate() {
     
     canJump = false; // Can't jump while swimming
     
-    // Swimming animation
-    if (isMoving && animations.swim) {
-      if (currentAction !== animations.swim) {
-        fadeToAction(animations.swim);
-      }
-      // Play swimming sound
-      if (swimmingSound.buffer && !swimmingSound.isPlaying) {
-        swimmingSound.play();
-      }
-      // Stop walking and running sound if playing
-      if (runningSound.isPlaying) {
-        runningSound.stop();
-      }
-      if (walkingSound.isPlaying) {
-        walkingSound.stop();
-      }
-    } else {
-      if (animations.idle && currentAction !== animations.idle) {
-        fadeToAction(animations.idle);
-      }
-      // Stop swimming sound when idle
-      if (swimmingSound.isPlaying) {
-        swimmingSound.stop();
+    // Swimming animation (only if not playing special animation)
+    if (!isPlayingSpecialAnimation) {
+      if (isMoving && animations.swim) {
+        if (currentAction !== animations.swim) {
+          fadeToAction(animations.swim);
+        }
+        // Play swimming sound
+        if (swimmingSound.buffer && !swimmingSound.isPlaying) {
+          swimmingSound.play();
+        }
+        // Stop walking and running sound if playing
+        if (runningSound.isPlaying) {
+          runningSound.stop();
+        }
+        if (walkingSound.isPlaying) {
+          walkingSound.stop();
+        }
+      } else {
+        if (animations.idle && currentAction !== animations.idle) {
+          fadeToAction(animations.idle);
+        }
+        // Stop swimming sound when idle
+        if (swimmingSound.isPlaying) {
+          swimmingSound.stop();
+        }
       }
     }
     
@@ -2026,40 +2092,42 @@ function animate() {
       canJump = true;
     }
     
-    // Animation blending based on speed (on land)
-    if (isMoving) {
-      const isRunning = move.sprint;
-      if (animations.run && animations.walk && isRunning) {
-        if (currentAction !== animations.run) {
-          fadeToAction(animations.run);
+    // Animation blending based on speed (on land) - only if not playing special animation
+    if (!isPlayingSpecialAnimation) {
+      if (isMoving) {
+        const isRunning = move.sprint;
+        if (animations.run && animations.walk && isRunning) {
+          if (currentAction !== animations.run) {
+            fadeToAction(animations.run);
+          }
+          if (!runningSound.isPlaying) runningSound.play();  
+          if (walkingSound.isPlaying) walkingSound.stop();
+      } else if (animations.walk) {
+          if (currentAction !== animations.walk) {
+            fadeToAction(animations.walk);
+          }
+          // Play walking sound
+          if(!walkingSound.isPlaying) walkingSound.play();
+          if (runningSound.isPlaying) runningSound.stop();
         }
-        if (!runningSound.isPlaying) runningSound.play();  
-        if (walkingSound.isPlaying) walkingSound.stop();
-    } else if (animations.walk) {
-        if (currentAction !== animations.walk) {
-          fadeToAction(animations.walk);
+        
+        
+        // Stop swimming sound if playing
+        if (swimmingSound.isPlaying) {
+          swimmingSound.stop();
         }
-        // Play walking sound
-        if(!walkingSound.isPlaying) walkingSound.play();
-        if (runningSound.isPlaying) runningSound.stop();
-      }
-      
-      
-      // Stop swimming sound if playing
-      if (swimmingSound.isPlaying) {
-        swimmingSound.stop();
-      }
-    } else {
-      // Idle animation when not moving
-      if (animations.idle && currentAction !== animations.idle) {
-        fadeToAction(animations.idle);
-      }
-      // Stop walking sound when idle
-      if (walkingSound.isPlaying) {
-        walkingSound.stop();
-      }
-      if (runningSound.isPlaying) {
-        runningSound.stop();
+      } else {
+        // Idle animation when not moving
+        if (animations.idle && currentAction !== animations.idle) {
+          fadeToAction(animations.idle);
+        }
+        // Stop walking sound when idle
+        if (walkingSound.isPlaying) {
+          walkingSound.stop();
+        }
+        if (runningSound.isPlaying) {
+          runningSound.stop();
+        }
       }
     }
     
@@ -2183,7 +2251,7 @@ if (!username) {
 
 try {
   console.log('Creating MultiplayerClient with username:', username);
-  multiplayerClient = new MultiplayerClient(scene, camera, character, username);
+  multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel);
   console.log('Multiplayer MMO client initialized with username:', username);
   
   // Add player count display

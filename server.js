@@ -37,6 +37,7 @@ class Player {
     this.username = null;
     this.position = { x: 0, y: 7.45, z: 0 };
     this.rotation = { y: 0 };
+    this.modelRotation = { y: 0 };
     this.animation = 'idle';
     this.lastUpdate = Date.now();
   }
@@ -78,6 +79,7 @@ wss.on('connection', (ws) => {
       username: p.username,
       position: p.position,
       rotation: p.rotation,
+      modelRotation: p.modelRotation,
       animation: p.animation
     }));
   
@@ -107,6 +109,7 @@ wss.on('connection', (ws) => {
             username: player.username,
             position: player.position,
             rotation: player.rotation,
+            modelRotation: player.modelRotation,
             animation: player.animation
           };
           
@@ -124,6 +127,7 @@ wss.on('connection', (ws) => {
         if (player) {
           player.position = data.position;
           player.rotation = data.rotation;
+          player.modelRotation = data.modelRotation || { y: 0 };
           player.animation = data.animation;
           player.lastUpdate = Date.now();
           
@@ -133,6 +137,7 @@ wss.on('connection', (ws) => {
             id: playerId,
             position: data.position,
             rotation: data.rotation,
+            modelRotation: data.modelRotation || { y: 0 },
             animation: data.animation
           }));
         }
