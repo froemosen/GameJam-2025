@@ -29,13 +29,16 @@ export class MultiplayerClient {
       
       this.ws.onopen = () => {
         console.log('Connected to MMO server!');
+        console.log('My username is:', this.username);
         this.reconnectAttempts = 0;
         
         // Send username to server
-        this.ws.send(JSON.stringify({
+        const usernameMessage = {
           type: 'setUsername',
           username: this.username
-        }));
+        };
+        console.log('Sending username to server:', usernameMessage);
+        this.ws.send(JSON.stringify(usernameMessage));
         
         this.startUpdateLoop();
       };

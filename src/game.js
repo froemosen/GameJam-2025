@@ -2076,17 +2076,23 @@ let currentAnimationState = 'idle';
 
 // Prompt for username
 let username = localStorage.getItem('gameUsername');
+console.log('Username from localStorage:', username);
 if (!username) {
   username = prompt('Enter your username:', 'Player' + Math.floor(Math.random() * 1000));
   if (username && username.trim()) {
     username = username.trim().substring(0, 20); // Limit to 20 chars
     localStorage.setItem('gameUsername', username);
+    console.log('Saved new username to localStorage:', username);
   } else {
     username = 'Player' + Math.floor(Math.random() * 1000);
+    console.log('Generated random username:', username);
   }
+} else {
+  console.log('Using existing username from localStorage:', username);
 }
 
 try {
+  console.log('Creating MultiplayerClient with username:', username);
   multiplayerClient = new MultiplayerClient(scene, camera, character, username);
   console.log('Multiplayer MMO client initialized with username:', username);
   
