@@ -97,8 +97,9 @@ wss.on('connection', (ws) => {
           
           // Notify others about username update
           broadcast(ws, JSON.stringify({
-            type: 'playerJoined',
-            player: player
+            type: 'usernameUpdate',
+            id: playerId,
+            username: data.username
           }));
         }
       } else if (data.type === 'update') {
