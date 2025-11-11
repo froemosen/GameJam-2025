@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	PlayerTimeout  = 30 * time.Second
-	SessionTimeout = 1 * time.Hour
+	PlayerTimeout   = 30 * time.Second
+	SessionTimeout  = 1 * time.Hour
 	CleanupInterval = 10 * time.Second
-	UpdateRate     = 50 * time.Millisecond // 20 updates per second
+	UpdateRate      = 50 * time.Millisecond // 20 updates per second
 )
 
 var upgrader = websocket.Upgrader{
@@ -27,28 +27,28 @@ var upgrader = websocket.Upgrader{
 
 // Thread-safe player structure
 type Player struct {
-	ID            string                 `json:"id"`
-	Username      string                 `json:"username"`
-	SessionID     string                 `json:"sessionId"`
-	Position      map[string]float64     `json:"position"`
-	Rotation      map[string]float64     `json:"rotation"`
-	ModelRotation map[string]float64     `json:"modelRotation"`
-	Animation     string                 `json:"animation"`
-	LastUpdate    time.Time              `json:"-"`
-	Conn          *websocket.Conn        `json:"-"`
-	mu            sync.RWMutex           `json:"-"`
+	ID            string             `json:"id"`
+	Username      string             `json:"username"`
+	SessionID     string             `json:"sessionId"`
+	Position      map[string]float64 `json:"position"`
+	Rotation      map[string]float64 `json:"rotation"`
+	ModelRotation map[string]float64 `json:"modelRotation"`
+	Animation     string             `json:"animation"`
+	LastUpdate    time.Time          `json:"-"`
+	Conn          *websocket.Conn    `json:"-"`
+	mu            sync.RWMutex       `json:"-"`
 }
 
 // Thread-safe session structure
 type GameSession struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	CreatorID    string         `json:"creatorId"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	CreatorID    string          `json:"creatorId"`
 	Players      map[string]bool `json:"-"`
-	PlayerCount  int            `json:"playerCount"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	LastActivity time.Time      `json:"lastActivity"`
-	mu           sync.RWMutex   `json:"-"`
+	PlayerCount  int             `json:"playerCount"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	LastActivity time.Time       `json:"lastActivity"`
+	mu           sync.RWMutex    `json:"-"`
 }
 
 // Global state with thread-safe access
@@ -65,20 +65,20 @@ var state = &GameState{
 
 // Message types
 type Message struct {
-	Type          string                 `json:"type"`
-	SessionID     string                 `json:"sessionId,omitempty"`
-	SessionName   string                 `json:"sessionName,omitempty"`
-	Username      string                 `json:"username,omitempty"`
-	Position      map[string]float64     `json:"position,omitempty"`
-	Rotation      map[string]float64     `json:"rotation,omitempty"`
-	ModelRotation map[string]float64     `json:"modelRotation,omitempty"`
-	Animation     string                 `json:"animation,omitempty"`
-	SoundType     string                 `json:"soundType,omitempty"`
-	ID            string                 `json:"id,omitempty"`
-	Player        map[string]interface{} `json:"player,omitempty"`
+	Type          string                   `json:"type"`
+	SessionID     string                   `json:"sessionId,omitempty"`
+	SessionName   string                   `json:"sessionName,omitempty"`
+	Username      string                   `json:"username,omitempty"`
+	Position      map[string]float64       `json:"position,omitempty"`
+	Rotation      map[string]float64       `json:"rotation,omitempty"`
+	ModelRotation map[string]float64       `json:"modelRotation,omitempty"`
+	Animation     string                   `json:"animation,omitempty"`
+	SoundType     string                   `json:"soundType,omitempty"`
+	ID            string                   `json:"id,omitempty"`
+	Player        map[string]interface{}   `json:"player,omitempty"`
 	Players       []map[string]interface{} `json:"players,omitempty"`
-	PlayerID      string                 `json:"playerId,omitempty"`
-	Message       string                 `json:"message,omitempty"`
+	PlayerID      string                   `json:"playerId,omitempty"`
+	Message       string                   `json:"message,omitempty"`
 }
 
 // Generate random session ID (6 characters, no confusing chars)
@@ -163,7 +163,7 @@ func broadcastToSession(sessionID string, message []byte, excludePlayerID string
 				p.mu.RLock()
 				conn := p.Conn
 				p.mu.RUnlock()
-				
+
 				if conn != nil {
 					err := conn.WriteMessage(websocket.TextMessage, message)
 					if err != nil {
@@ -193,7 +193,7 @@ func broadcastToAll(message []byte) {
 			p.mu.RLock()
 			conn := p.Conn
 			p.mu.RUnlock()
-			
+
 			if conn != nil {
 				err := conn.WriteMessage(websocket.TextMessage, message)
 				if err != nil {
@@ -316,14 +316,14 @@ func handleListSessions(player *Player) {
 	player.mu.RLock()
 	conn := player.Conn
 	player.mu.RUnlock()
-	
+
 	conn.WriteMessage(websocket.TextMessage, response)
 }
 
 // Handle create session request
 func handleCreateSession(player *Player, msg *Message) {
 	sessionID := generateSessionID()
-	
+
 	session := &GameSession{
 		ID:           sessionID,
 		Name:         msg.SessionName,
@@ -348,7 +348,7 @@ func handleCreateSession(player *Player, msg *Message) {
 	player.mu.RLock()
 	conn := player.Conn
 	player.mu.RUnlock()
-	
+
 	conn.WriteMessage(websocket.TextMessage, response)
 }
 
@@ -411,7 +411,7 @@ func handleJoinSession(player *Player, msg *Message) {
 	player.mu.RLock()
 	conn := player.Conn
 	player.mu.RUnlock()
-	
+
 	conn.WriteMessage(websocket.TextMessage, response)
 }
 
@@ -507,7 +507,7 @@ func handleDisconnect(player *Player) {
 
 		if exists {
 			session.RemovePlayer(player.ID)
-			log.Printf("Player %s removed from session %s. Session players: %d", 
+			log.Printf("Player %s removed from session %s. Session players: %d",
 				player.ID, sessionID, session.GetPlayerCount())
 
 			// Notify other players
@@ -603,14 +603,14 @@ func main() {
 	// Setup routes
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/health", healthHandler)
-	
+
 	// Serve static files
 	fs := http.FileServer(http.Dir("."))
 	http.Handle("/", fs)
 
 	log.Printf("Go MMO Server running on port %s", port)
 	log.Printf("WebSocket endpoint: ws://localhost:%s/ws", port)
-	
+
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Server error:", err)
 	}
