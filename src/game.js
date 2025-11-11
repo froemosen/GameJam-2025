@@ -7,14 +7,16 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 import { MultiplayerClient } from './multiplayer.js';
 import { OptimizedTerrain } from './terrain.js';
 
-// Make THREE and GLTFLoader globally available for multiplayer module
+// Make THREE, GLTFLoader and DRACOLoader globally available for multiplayer module
 window.THREE = THREE;
 window.GLTFLoader = GLTFLoader;
+window.DRACOLoader = DRACOLoader;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
@@ -739,7 +741,13 @@ class CachedGLTFLoader extends GLTFLoader {
   }
 }
 
+// Setup DRACO loader for compressed models
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+dracoLoader.setDecoderConfig({ type: 'js' });
+
 const loader = new CachedGLTFLoader();
+loader.setDRACOLoader(dracoLoader);
 
 // Load the character model and animations
 Promise.all([
@@ -785,6 +793,11 @@ Promise.all([
   console.log('Mohamed loaded with animations!');
 }).catch(err => {
   console.error('Error loading Mohamed:', err);
+  console.error('Error details:', {
+    message: err.message,
+    stack: err.stack,
+    name: err.name
+  });
   // Fallback: add a visible box if model fails to load
   const fallback = new THREE.Mesh(
     new THREE.BoxGeometry(1, 2, 1),

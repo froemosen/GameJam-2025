@@ -164,6 +164,7 @@ export class MultiplayerClient {
   loadMohamedForPlayer(playerId, playerState) {
     const THREE = window.THREE;
     const GLTFLoader = window.GLTFLoader;
+    const DRACOLoader = window.DRACOLoader;
     
     if (!GLTFLoader) {
       console.warn('GLTFLoader not available, using box placeholder');
@@ -171,6 +172,14 @@ export class MultiplayerClient {
     }
     
     const loader = new GLTFLoader();
+    
+    // Setup DRACO loader if available
+    if (DRACOLoader) {
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      dracoLoader.setDecoderConfig({ type: 'js' });
+      loader.setDRACOLoader(dracoLoader);
+    }
     
     // Load Mohamed model and animations for remote player
     Promise.all([
@@ -224,7 +233,12 @@ export class MultiplayerClient {
       console.log(`Mohamed model loaded for remote player ${playerId}`);
     }).catch(err => {
       console.error(`Error loading Mohamed for player ${playerId}:`, err);
-      // Keep using box placeholder
+      console.error('Error details:', {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
+      // Keep using box placeholder if model fails to load
     });
   }
   
