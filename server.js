@@ -70,11 +70,21 @@ wss.on('connection', (ws) => {
   
   console.log(`Player ${playerId} connected. Total players: ${players.size}`);
   
-  // Send player their ID and existing players
+  // Send player their ID and existing players (serialize properly)
+  const existingPlayers = Array.from(players.values())
+    .filter(p => p.id !== playerId)
+    .map(p => ({
+      id: p.id,
+      username: p.username,
+      position: p.position,
+      rotation: p.rotation,
+      animation: p.animation
+    }));
+  
   ws.send(JSON.stringify({
     type: 'init',
     id: playerId,
-    players: Array.from(players.values()).filter(p => p.id !== playerId)
+    players: existingPlayers
   }));
   
   // Don't broadcast playerJoined yet - wait for username first
@@ -91,10 +101,21 @@ wss.on('connection', (ws) => {
           player.username = data.username;
           console.log(`Player ${playerId} set username to: ${data.username}`);
           
+          // Create player data object to broadcast
+          const playerData = {
+            id: player.id,
+            username: player.username,
+            position: player.position,
+            rotation: player.rotation,
+            animation: player.animation
+          };
+          
+          console.log('Broadcasting player joined:', playerData);
+          
           // Now broadcast playerJoined with the full player info including username
           broadcast(ws, JSON.stringify({
             type: 'playerJoined',
-            player: player
+            player: playerData
           }));
         }
       } else if (data.type === 'update') {
