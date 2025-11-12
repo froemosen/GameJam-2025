@@ -100,15 +100,14 @@ PORT=8080 go run server.go
 ```json
 {"type": "listSessions"}
 {"type": "createSession", "sessionName": "My Game"}
-{"type": "joinSession", "sessionId": "ABC123"}
-{"type": "setUsername", "username": "Player1"}
+{"type": "joinSession", "sessionId": "ABC123", "username": "Player1"}
 {"type": "update", "position": {...}, "rotation": {...}, "animation": "walk"}
 {"type": "sound", "soundType": "jump", "position": {...}}
 ```
 
 ### Server → Client
 ```json
-{"type": "sessionList", "players": [...]}
+{"type": "updateSessionList", "players": [...]}
 {"type": "sessionCreated", "sessionId": "ABC123", "sessionName": "My Game"}
 {"type": "sessionJoined", "sessionId": "ABC123", "playerId": "xyz", "players": [...]}
 {"type": "playerJoined", "player": {...}}

@@ -11,10 +11,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY server.go .
+COPY internal ./internal
+COPY main.go .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server server.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server main.go
 
 # Final stage - minimal image
 FROM alpine:latest

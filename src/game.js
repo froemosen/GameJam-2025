@@ -4,17 +4,15 @@
 // - Pointer lock for mouse-look
 // - Animation blending (idle, walk, run)
 
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
-import { MultiplayerClient } from './multiplayer.js';
-import { OptimizedTerrain } from './terrain.js';
 import { MainMenu } from './mainMenu.js';
+import { MultiplayerClient } from './multiplayer.js';
 
 // Make THREE, GLTFLoader, DRACOLoader, MeshoptDecoder and SkeletonUtils globally available for multiplayer module
 window.THREE = THREE;
@@ -670,8 +668,6 @@ audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
   themeSound.setDistanceModel('exponential'); // Exponential falloff for dramatic distance effect
 });
 
-
-
 audioLoader.load('./assets/walking_elephant.m4a', (buffer) => {
   walkingSound.setBuffer(buffer);
   walkingSound.setLoop(true);
@@ -889,18 +885,6 @@ Promise.all([
   fallback.position.y = 1;
   character.add(fallback);
 });
-
-// Simple obstacles
-for (let i = 0; i < 8; i++) {
-  const b = new THREE.Mesh(
-    new THREE.BoxGeometry(1 + Math.random() * 3, 1 + Math.random() * 4, 1 + Math.random() * 3),
-    new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
-  );
-  b.position.set((Math.random() - 0.5) * 40, b.geometry.parameters.height / 2, (Math.random() - 0.5) * 40);
-  b.castShadow = true;
-  b.receiveShadow = true;
-  scene.add(b);
-}
 
 // Load Castle of Loarre at the edge of the world
 let venueModel = null;
@@ -1211,20 +1195,6 @@ backgroundLoader.load('./assets/castle_of_loarre.glb', (gltf) => {
   console.error('Error loading Castle of Loarre:', err);
 });
 
-// Create cinema-style screen with iframe
-// const iframe = document.createElement('iframe');
-// iframe.src = 'https://bytes-theta-gets-interior.trycloudflare.com/';
-// iframe.style.width = '1920px';
-// iframe.style.height = '1080px';
-// iframe.style.border = '0';
-// iframe.style.pointerEvents = 'auto'; // Enable interaction with iframe
-
-// const css3DObject = new CSS3DObject(iframe);
-// css3DObject.position.set(50, 15, 50); // Position near spawn
-// css3DObject.rotation.y = (Math.PI*1.2) ; // Angle towards spawn
-// css3DObject.scale.set(0.02, 0.02, 0.02); // Scale down to reasonable size
-// //scene.add(css3DObject);
-
 // Cinema button variables
 let leftCinemaButton = null;
 let rightCinemaButton = null;
@@ -1312,7 +1282,7 @@ function switchCinemaImage(imageType) {
 }
 
 // Function to show venue iframe
-function showVenueIframe(url = "MIKKEL_APP") {
+function showVenueIframe(url = MIKKEL_APP) {
   if (!venueIframe) {
     // Create container for iframe with close button
     const iframeContainer = document.createElement('div');
@@ -1556,11 +1526,7 @@ function onKeyDown(e) {
       return;
     } else if (gameStarted) {
       // Return to main menu
-      e.preventDefault();
-      e.stopPropagation();
-      if (confirm('Return to main menu? (You will leave the current session)')) {
-        location.reload();
-      }
+      goToMainMenu();
       return;
     }
   }
@@ -2340,6 +2306,14 @@ console.log('Initializing main menu...');
 const mainMenu = new MainMenu(startGameWithSession);
 window.mainMenu = mainMenu; // Expose to window for onclick handlers
 console.log('Main menu initialized, waiting for user to select/create session');
+
+function goToMainMenu() {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirm('Return to main menu? (You will leave the current session)')) {
+        location.reload();
+    }
+}
 
 
 function makeOcaml(x, y, z, size) {
