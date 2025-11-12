@@ -5,7 +5,8 @@ export class MainMenu {
     this.menuElement = null;
     this.ws = null;
     this.availableSessions = [];
-    this.sessionListUpdateInterval = null;
+    this.isCreatingSession = false;
+    this.isJoiningSession = false;
     
     this.createMenuUI();
     this.connectToServer();
@@ -430,11 +431,6 @@ export class MainMenu {
     this.ws.onopen = () => {
       console.log('Menu connected to server');
       this.requestSessionList();
-      
-      // Update session list every 3 seconds
-      this.sessionListUpdateInterval = setInterval(() => {
-        this.requestSessionList();
-      }, 3000);
     };
     
     this.ws.onmessage = (event) => {
@@ -455,36 +451,36 @@ export class MainMenu {
       if (event.code !== 1000 && event.code !== 1001) {
         console.log('Menu disconnected from server (code:', event.code, ')');
       }
-      if (this.sessionListUpdateInterval) {
-        clearInterval(this.sessionListUpdateInterval);
-      }
     };
   }
   
   handleServerMessage(data) {
     switch (data.type) {
-      case 'sessionList':
+      case 'updateSessionList':
         this.updateSessionList(data.sessions);
         break;
       case 'sessionCreated':
+        this.resetLoadingStates();
         this.showSessionCreated(data.sessionId, data.sessionName);
         break;
       case 'sessionJoined':
+        this.resetLoadingStates();
         this.startGame(data.sessionId);
         break;
       case 'error':
+        this.resetLoadingStates();
         alert('Error: ' + data.message);
         break;
     }
   }
   
   requestSessionList() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'listSessions' }));
-    }
+    this.sendWSMessage({ type: 'listSessions' });
   }
   
   createSession() {
+    if (this.isCreatingSession) return;
+    
     const usernameInput = document.getElementById('username-input');
     const username = usernameInput.value.trim();
     
@@ -495,19 +491,41 @@ export class MainMenu {
     }
     
     const nameInput = document.getElementById('session-name-input');
-    const sessionName = nameInput.value.trim() || 'Unnamed Session';
+    const sessionName = nameInput.value.trim();
     
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'createSession',
-        sessionName: sessionName
-      }));
-      
-      nameInput.value = '';
+    if (!sessionName) {
+      alert('Please enter a session name!');
+      nameInput.focus();
+      return;
     }
+    
+    // Set loading state
+    this.isCreatingSession = true;
+    const createBtn = document.getElementById('create-session-btn');
+    const originalText = createBtn.innerHTML;
+    createBtn.disabled = true;
+    createBtn.innerHTML = '<span class="spinner"></span> Creating...';
+    
+    this.sendWSMessage({
+      type: 'createSession',
+      sessionName: sessionName
+    });
+      
+    nameInput.value = '';
+    
+    // Reset button after timeout if no response
+    setTimeout(() => {
+      if (this.isCreatingSession) {
+        this.isCreatingSession = false;
+        createBtn.disabled = false;
+        createBtn.innerHTML = originalText;
+      }
+    }, 10000);
   }
   
   joinSessionById() {
+    if (this.isJoiningSession) return;
+    
     const usernameInput = document.getElementById('username-input');
     const username = usernameInput.value.trim();
     
@@ -524,18 +542,34 @@ export class MainMenu {
       alert('Please enter a session ID');
       return;
     }
-    
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'joinSession',
-        sessionId: sessionId
-      }));
+
+    // Set loading state
+    this.isJoiningSession = true;
+    const joinBtn = document.getElementById('join-by-id-btn');
+    const originalText = joinBtn.innerHTML;
+    joinBtn.disabled = true;
+    joinBtn.innerHTML = '<span class="spinner"></span> Joining...';
+
+    this.sendWSMessage({
+      type: 'joinSession',
+      sessionId: sessionId
+    });
       
-      idInput.value = '';
-    }
+    idInput.value = '';
+    
+    // Reset button after timeout if no response
+    setTimeout(() => {
+      if (this.isJoiningSession) {
+        this.isJoiningSession = false;
+        joinBtn.disabled = false;
+        joinBtn.innerHTML = originalText;
+      }
+    }, 10000);
   }
   
   joinSession(sessionId) {
+    if (this.isJoiningSession) return;
+    
     const usernameInput = document.getElementById('username-input');
     const username = usernameInput.value.trim();
     
@@ -544,13 +578,19 @@ export class MainMenu {
       usernameInput.focus();
       return;
     }
+
+    // Set loading state
+    this.isJoiningSession = true;
+
+    this.sendWSMessage({    
+      type: 'joinSession',
+      sessionId: sessionId
+    });
     
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'joinSession',
-        sessionId: sessionId
-      }));
-    }
+    // Reset state after timeout if no response
+    setTimeout(() => {
+      this.isJoiningSession = false;
+    }, 10000);
   }
   
   updateSessionList(sessions) {
@@ -604,15 +644,8 @@ export class MainMenu {
   startGame(sessionId) {
     console.log('Starting game in session:', sessionId);
     
-    // Stop session list updates
-    if (this.sessionListUpdateInterval) {
-      clearInterval(this.sessionListUpdateInterval);
-    }
-    
     // Close menu WebSocket (game will create its own)
-    if (this.ws) {
-      this.ws.close();
-    }
+    this.closeWS();
     
     // Get username from input
     const usernameInput = document.getElementById('username-input');
@@ -650,8 +683,70 @@ export class MainMenu {
       clearInterval(this.sessionListUpdateInterval);
     }
     
+    this.closeWS();
+  }
+
+  closeWS() {
     if (this.ws) {
+      this.ws.dispatchEvent(new CloseEvent('close', {code: 1000, reason: 'Menu closed'}));
       this.ws.close();
     }
   }
+
+  resetLoadingStates() {
+    // Reset create session button
+    if (this.isCreatingSession) {
+      this.isCreatingSession = false;
+      const createBtn = document.getElementById('create-session-btn');
+      if (createBtn) {
+        createBtn.disabled = false;
+        createBtn.innerHTML = '✨ Create Session';
+      }
+    }
+    
+    // Reset join by ID button
+    if (this.isJoiningSession) {
+      this.isJoiningSession = false;
+      const joinBtn = document.getElementById('join-by-id-btn');
+      if (joinBtn) {
+        joinBtn.disabled = false;
+        joinBtn.innerHTML = '🔗 Join by ID';
+      }
+    }
+  }
+
+  sendWSMessage(message) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+}
+
+// Add spinner CSS if not already present
+if (!document.getElementById('menu-spinner-styles')) {
+  const style = document.createElement('style');
+  style.id = 'menu-spinner-styles';
+  style.textContent = `
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .menu-button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  `;
+  document.head.appendChild(style);
 }

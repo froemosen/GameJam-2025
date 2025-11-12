@@ -42,20 +42,11 @@ export class MultiplayerClient {
         // Send session join request to server
         const joinMessage = {
           type: 'joinSession',
-          sessionId: this.sessionId
+          sessionId: this.sessionId,
+          username: this.username
         };
         console.log('Joining session:', joinMessage);
         this.ws.send(JSON.stringify(joinMessage));
-        
-        // Send username to server after a short delay to ensure session join is processed first
-        setTimeout(() => {
-          const usernameMessage = {
-            type: 'setUsername',
-            username: this.username
-          };
-          console.log('Sending username to server:', usernameMessage);
-          this.ws.send(JSON.stringify(usernameMessage));
-        }, 100);
         
         this.startUpdateLoop();
       };
@@ -86,6 +77,19 @@ export class MultiplayerClient {
       this.attemptReconnect();
     }
   }
+
+  closeWS() {
+    if (this.ws) {
+      this.ws.dispatchEvent(new CloseEvent('close', {code: 1000, reason: 'Disconnected from game'}));
+      this.ws.close();
+    }
+  }
+
+  sendWSMessage(message) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
   
   attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -99,16 +103,6 @@ export class MultiplayerClient {
   
   handleMessage(data) {
     switch (data.type) {
-      case 'init':
-        this.playerId = data.id;
-        console.log('Assigned player ID:', this.playerId);
-        
-        // Add existing players
-        data.players.forEach(playerData => {
-          this.addRemotePlayer(playerData);
-        });
-        break;
-        
       case 'sessionJoined':
         // Handle session join response
         this.playerId = data.playerId;
@@ -122,7 +116,6 @@ export class MultiplayerClient {
           });
         }
         break;
-        
       case 'playerJoined':
         console.log('Player joined:', data.player.id);
         this.addRemotePlayer(data.player);
@@ -137,13 +130,16 @@ export class MultiplayerClient {
         this.updateRemotePlayer(data);
         break;
         
-      case 'sound':
+      case 'playSound':
         this.playRemoteSound(data);
         break;
     }
   }
   
   addRemotePlayer(playerData) {
+    if (playerData.id === this.playerId) {
+        return; // Don't add ourselves
+    }
     if (this.remotePlayers.has(playerData.id)) {
       console.log(`Remote player ${playerData.id} already exists, skipping`);
       return; // Player already exists
@@ -516,6 +512,10 @@ export class MultiplayerClient {
   triggerSound(soundType) {
     // Send sound trigger to other players
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (!['agree', 'dance', 'boom', 'boxing', 'dead', 'skill'].includes(soundType)) {
+        console.warn(`Unknown sound type: ${soundType}`);
+        return;
+      }
       const soundMessage = {
         type: 'sound',
         soundType: soundType,
@@ -548,9 +548,10 @@ export class MultiplayerClient {
     }
     
     const sound = new THREE.PositionalAudio(audioListener);
-    sound.setRefDistance(10);
-    sound.setMaxDistance(50);
-    sound.setRolloffFactor(1.5);
+    sound.setRefDistance(10); // Distance at which volume is 100%
+    sound.setMaxDistance(50); // Maximum distance for sound attenuation
+    sound.setRolloffFactor(1.5); // How quickly the sound attenuates with distance
+    sound.setDistanceModel('exponential'); // Exponential falloff for dramatic distance effect
     
     // Create a temporary object at the sound position
     const soundSource = new THREE.Object3D();
@@ -664,9 +665,7 @@ export class MultiplayerClient {
   
   disconnect() {
     this.stopUpdateLoop();
-    if (this.ws) {
-      this.ws.close();
-    }
+    this.closeWS();
   }
   
   getPlayerCount() {
