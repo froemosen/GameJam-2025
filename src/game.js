@@ -899,6 +899,8 @@ let screenshotMesh = null;
 let venueIframe = null;
 let venueCSS3DObject = null;
 let isVenueIframeVisible = false;
+let iframeClosedTime = 0; // Timestamp when iframe was closed
+const IFRAME_COOLDOWN_MS = 500; // Cooldown period in milliseconds
 
 loader.load('./assets/venue.glb', (gltf) => {
   venueModel = gltf.scene;
@@ -1413,6 +1415,9 @@ function hideVenueIframe() {
     }
     isVenueIframeVisible = false;
     
+    // Set cooldown timestamp to prevent immediate re-opening
+    iframeClosedTime = Date.now();
+    
     // Only try to re-lock pointer on desktop (not mobile) and if game has started
     if (!('ontouchstart' in window) && gameStarted) {
       renderer.domElement.requestPointerLock();
@@ -1439,75 +1444,6 @@ let isCinemaMode = false;
 // Raycaster for click detection
 const clickRaycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-
-// Request pointer lock on click (only when game has started)
-document.addEventListener('click', (event) => {
-  if (isPointerLocked) {
-    // Calculate mouse position in normalized device coordinates (-1 to +1)
-    mouse.x = 0; // Center of screen in pointer lock
-    mouse.y = 0;
-    
-    clickRaycaster.setFromCamera(mouse, camera);
-    
-    // Check for cinema button clicks
-    if (leftCinemaButton && rightCinemaButton) {
-      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
-      if (buttonIntersects.length > 0) {
-        const clickedButton = buttonIntersects[0].object;
-        if (clickedButton.userData.buttonType) {
-          switchCinemaImage(clickedButton.userData.buttonType);
-          return;
-        }
-      }
-    }
-    
-    // Check if clicking on screenshot
-    if (screenshotMesh) {
-      const intersects = clickRaycaster.intersectObject(screenshotMesh);
-      if (intersects.length > 0) {
-        // Clicked on screenshot - show iframe with URL based on current image
-        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
-        showVenueIframe(url);
-        console.log('Opening iframe with:', url);
-        return;
-      }
-    }
-  }
-  
-  // Only request pointer lock if the game has started
-  if (gameStarted) {
-    renderer.domElement.requestPointerLock();
-  }
-});
-
-// Track pointer lock state
-document.addEventListener('pointerlockchange', () => {
-  isPointerLocked = document.pointerLockElement === renderer.domElement;
-  
-  // Start theme music on first pointer lock (user interaction)
-  if (isPointerLocked && themeSound.buffer && !themeSound.isPlaying) {
-    themeSound.play();
-    console.log('Theme music started!');
-  }
-  
-  if (!isPointerLocked && isCinemaMode) {
-    // Exited pointer lock while in cinema mode - exit cinema mode
-    isCinemaMode = false;
-    cssRenderer.domElement.style.pointerEvents = 'none';
-  }
-});
-
-// Mouse movement for camera rotation
-document.addEventListener('mousemove', (e) => {
-  if (!isPointerLocked) return;
-  
-  const sensitivity = 0.003;
-  cameraYaw -= e.movementX * sensitivity;
-  cameraPitch -= e.movementY * sensitivity;
-  
-  // Clamp pitch to prevent camera flipping
-  cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
-});
 
 // Movement state
 const move = { forward: 0, right: 0, up: 0, sprint: false };
@@ -1650,18 +1586,6 @@ function onKeyUp(e) {
       break;
   }
 }
-document.addEventListener('keydown', onKeyDown);
-document.addEventListener('keyup', onKeyUp);
-
-// Additional escape key handler with capture to prevent iframe from consuming it
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' && isVenueIframeVisible) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideVenueIframe();
-    console.log('Window escape handler - closing iframe');
-  }
-}, true); // Use capture phase
 
 // Mobile controls
 const joystickContainer = document.getElementById('joystick-container');
@@ -1672,71 +1596,6 @@ let joystickActive = false;
 let joystickCenter = { x: 0, y: 0 };
 let joystickDelta = { x: 0, y: 0 };
 
-if (joystickContainer) {
-  // Joystick touch handling
-  joystickContainer.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    joystickActive = true;
-    const rect = joystickContainer.getBoundingClientRect();
-    joystickCenter.x = rect.left + rect.width / 2;
-    joystickCenter.y = rect.top + rect.height / 2;
-  });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!joystickActive) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    const deltaX = touch.clientX - joystickCenter.x;
-    const deltaY = touch.clientY - joystickCenter.y;
-    
-    const maxDistance = 35; // Maximum joystick travel distance
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    
-    if (distance < maxDistance) {
-      joystickDelta.x = deltaX / maxDistance;
-      joystickDelta.y = deltaY / maxDistance;
-      joystickStick.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
-    } else {
-      const angle = Math.atan2(deltaY, deltaX);
-      const limitedX = Math.cos(angle) * maxDistance;
-      const limitedY = Math.sin(angle) * maxDistance;
-      joystickDelta.x = limitedX / maxDistance;
-      joystickDelta.y = limitedY / maxDistance;
-      joystickStick.style.transform = `translate(calc(-50% + ${limitedX}px), calc(-50% + ${limitedY}px))`;
-    }
-    
-    // Update movement state based on joystick
-    move.forward = -joystickDelta.y; // Inverted Y for forward/back
-    move.right = -joystickDelta.x; // Inverted X for left/right
-  });
-
-  document.addEventListener('touchend', (e) => {
-    if (!joystickActive) return;
-    joystickActive = false;
-    joystickDelta.x = 0;
-    joystickDelta.y = 0;
-    joystickStick.style.transform = 'translate(-50%, -50%)';
-    
-    // Reset movement
-    move.forward = 0;
-    move.right = 0;
-  });
-}
-
-if (jumpButton) {
-  jumpButton.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (canJump) {
-      velocity.y += 10;
-      canJump = false;
-      if (jumpingSound.buffer && !jumpingSound.isPlaying) {
-        jumpingSound.play();
-      }
-    }
-  });
-}
-
 // Mobile touch controls for camera rotation
 let isTouchRotating = false;
 let touchStartX = 0;
@@ -1745,130 +1604,6 @@ let touchStartTime = 0;
 let lastTouchX = 0;
 let lastTouchY = 0;
 let hasDragged = false;
-
-document.addEventListener('touchstart', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchstart blocked - iframe is visible');
-    return;
-  }
-  
-  // Only handle camera rotation if touching outside controls
-  const touch = e.touches[0];
-  const touchX = touch.clientX;
-  const touchY = touch.clientY;
-  
-  // Check if touch is in upper 2/3 of screen (not on controls)
-  if (touchY < window.innerHeight * 0.66) {
-    e.preventDefault(); // Prevent page scrolling
-    isTouchRotating = true;
-    touchStartX = touchX;
-    touchStartY = touchY;
-    touchStartTime = Date.now();
-    lastTouchX = touchX;
-    lastTouchY = touchY;
-    hasDragged = false;
-    console.log('Camera rotation started');
-  }
-}, { passive: false });
-
-document.addEventListener('touchmove', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchmove blocked - iframe is visible');
-    return;
-  }
-  if (!isTouchRotating) return;
-  
-  // Prevent page scrolling
-  e.preventDefault();
-  
-  const touch = e.touches[0];
-  const deltaX = touch.clientX - lastTouchX;
-  const deltaY = touch.clientY - lastTouchY;
-  
-  // Check if user has dragged enough to be considered camera rotation (not a tap)
-  const totalDragDistance = Math.sqrt(
-    Math.pow(touch.clientX - touchStartX, 2) + 
-    Math.pow(touch.clientY - touchStartY, 2)
-  );
-  
-  if (totalDragDistance > 10) { // Threshold for distinguishing tap from drag
-    hasDragged = true;
-  }
-  
-  const sensitivity = 0.005;
-  cameraYaw -= deltaX * sensitivity;
-  cameraPitch -= deltaY * sensitivity;
-  
-  // Clamp pitch
-  cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
-  
-  lastTouchX = touch.clientX;
-  lastTouchY = touch.clientY;
-}, { passive: false });
-
-document.addEventListener('touchend', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchend blocked - iframe is visible');
-    return;
-  }
-  
-  // Only process tap if we were tracking a touch
-  if (!isTouchRotating) return;
-  
-  // Check if this was a tap (not dragged and quick)
-  const touchDuration = Date.now() - touchStartTime;
-  const wasTap = !hasDragged && touchDuration < 300; // Less than 300ms = tap
-  
-  if (wasTap && e.changedTouches && e.changedTouches.length > 0) {
-    const touch = e.changedTouches[0];
-    
-    console.log('Tap detected at:', touch.clientX, touch.clientY);
-    
-    // Convert touch coordinates to normalized device coordinates
-    mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
-    
-    clickRaycaster.setFromCamera(mouse, camera);
-    
-    // Check for cinema button clicks
-    if (leftCinemaButton && rightCinemaButton) {
-      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
-      if (buttonIntersects.length > 0) {
-        const clickedButton = buttonIntersects[0].object;
-        if (clickedButton.userData.buttonType) {
-          console.log('Cinema button tapped:', clickedButton.userData.buttonType);
-          switchCinemaImage(clickedButton.userData.buttonType);
-          isTouchRotating = false;
-          hasDragged = false;
-          return;
-        }
-      }
-    }
-    
-    // Check if tapping on screenshot
-    if (screenshotMesh) {
-      const intersects = clickRaycaster.intersectObject(screenshotMesh);
-      if (intersects.length > 0) {
-        console.log('Screenshot tapped! Opening iframe...');
-        // Tapped on screenshot - show iframe with URL based on current image
-        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
-        showVenueIframe(url);
-        isTouchRotating = false;
-        hasDragged = false;
-        return;
-      } else {
-        console.log('No intersection with screenshot');
-      }
-    }
-  }
-  
-  // Reset state
-  isTouchRotating = false;
-  hasDragged = false;
-});
 
 // Camera follow offset
 const cameraOffset = new THREE.Vector3(0, 4, 6);
@@ -2225,13 +1960,6 @@ function animate() {
   cssRenderer.render(scene, camera); // Render CSS3D layer
 }
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  cssRenderer.setSize(window.innerWidth, window.innerHeight);
-});
-
 // Put the camera initially behind the character
 const distance = cameraOffset.z;
 const height = cameraOffset.y;
@@ -2246,6 +1974,317 @@ camera.lookAt(character.position);
 let multiplayerClient = null;
 let currentAnimationState = 'idle';
 let gameStarted = false; // Flag to prevent pointer lock until game starts
+
+function setupEventHandlers() {
+  // Click handler for pointer lock and object interaction
+  document.addEventListener('click', (event) => {
+    if (isPointerLocked) {
+      // Calculate mouse position in normalized device coordinates (-1 to +1)
+      mouse.x = 0; // Center of screen in pointer lock
+      mouse.y = 0;
+      
+      clickRaycaster.setFromCamera(mouse, camera);
+      
+      // Check for cinema button clicks
+      if (leftCinemaButton && rightCinemaButton) {
+        const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+        if (buttonIntersects.length > 0) {
+          const clickedButton = buttonIntersects[0].object;
+          if (clickedButton.userData.buttonType) {
+            switchCinemaImage(clickedButton.userData.buttonType);
+            return;
+          }
+        }
+      }
+      
+      // Check if clicking on screenshot
+      if (screenshotMesh) {
+        const intersects = clickRaycaster.intersectObject(screenshotMesh);
+        if (intersects.length > 0) {
+          // Check cooldown to prevent immediate re-opening after closing
+          const timeSinceClose = Date.now() - iframeClosedTime;
+          if (timeSinceClose < IFRAME_COOLDOWN_MS) {
+            console.log('Screenshot click blocked by cooldown:', timeSinceClose, 'ms');
+            return;
+          }
+          
+          // Clicked on screenshot - show iframe with URL based on current image
+          const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+          showVenueIframe(url);
+          console.log('Opening iframe with:', url);
+          return;
+        }
+      }
+    }
+    
+    // Only request pointer lock if the game has started
+    if (gameStarted) {
+      renderer.domElement.requestPointerLock();
+    }
+  });
+
+  // Track pointer lock state
+  document.addEventListener('pointerlockchange', () => {
+    isPointerLocked = document.pointerLockElement === renderer.domElement;
+    
+    // Start theme music on first pointer lock (user interaction)
+    if (isPointerLocked && themeSound.buffer && !themeSound.isPlaying) {
+      themeSound.play();
+      console.log('Theme music started!');
+    }
+    
+    if (!isPointerLocked && isCinemaMode) {
+      // Exited pointer lock while in cinema mode - exit cinema mode
+      isCinemaMode = false;
+      cssRenderer.domElement.style.pointerEvents = 'none';
+    }
+  });
+
+  // Mouse movement for camera rotation
+  document.addEventListener('mousemove', (e) => {
+    if (!isPointerLocked) return;
+    
+    const sensitivity = 0.003;
+    cameraYaw -= e.movementX * sensitivity;
+    cameraPitch -= e.movementY * sensitivity;
+    
+    // Clamp pitch to prevent camera flipping
+    cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
+  });
+
+  // Keyboard event handlers
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+
+  // Additional escape key handler with capture to prevent iframe from consuming it
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && isVenueIframeVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideVenueIframe();
+      console.log('Window escape handler - closing iframe');
+    }
+  }, true); // Use capture phase
+
+  // Mobile joystick controls
+  if (joystickContainer) {
+    // Joystick touch handling
+    joystickContainer.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      joystickActive = true;
+      const rect = joystickContainer.getBoundingClientRect();
+      joystickCenter.x = rect.left + rect.width / 2;
+      joystickCenter.y = rect.top + rect.height / 2;
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!joystickActive) return;
+      e.preventDefault();
+      
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - joystickCenter.x;
+      const deltaY = touch.clientY - joystickCenter.y;
+      
+      const maxDistance = 35; // Maximum joystick travel distance
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      
+      if (distance < maxDistance) {
+        joystickDelta.x = deltaX / maxDistance;
+        joystickDelta.y = deltaY / maxDistance;
+        joystickStick.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
+      } else {
+        const angle = Math.atan2(deltaY, deltaX);
+        const limitedX = Math.cos(angle) * maxDistance;
+        const limitedY = Math.sin(angle) * maxDistance;
+        joystickDelta.x = limitedX / maxDistance;
+        joystickDelta.y = limitedY / maxDistance;
+        joystickStick.style.transform = `translate(calc(-50% + ${limitedX}px), calc(-50% + ${limitedY}px))`;
+      }
+      
+      // Update movement state based on joystick
+      move.forward = -joystickDelta.y; // Inverted Y for forward/back
+      move.right = -joystickDelta.x; // Inverted X for left/right
+    });
+
+    document.addEventListener('touchend', (e) => {
+      if (!joystickActive) return;
+      joystickActive = false;
+      joystickDelta.x = 0;
+      joystickDelta.y = 0;
+      joystickStick.style.transform = 'translate(-50%, -50%)';
+      
+      // Reset movement
+      move.forward = 0;
+      move.right = 0;
+    });
+  }
+
+  // Mobile jump button
+  if (jumpButton) {
+    jumpButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (canJump) {
+        velocity.y += 10;
+        canJump = false;
+        if (jumpingSound.buffer && !jumpingSound.isPlaying) {
+          jumpingSound.play();
+        }
+      }
+    });
+  }
+
+  // Mobile touch controls for camera rotation
+  document.addEventListener('touchstart', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchstart blocked - iframe is visible');
+      return;
+    }
+    
+    // Only handle camera rotation if touching outside controls
+    const touch = e.touches[0];
+    const touchX = touch.clientX;
+    const touchY = touch.clientY;
+    
+    // Check if touch is in upper 2/3 of screen (not on controls)
+    if (touchY < window.innerHeight * 0.66) {
+      e.preventDefault(); // Prevent page scrolling
+      isTouchRotating = true;
+      touchStartX = touchX;
+      touchStartY = touchY;
+      touchStartTime = Date.now();
+      lastTouchX = touchX;
+      lastTouchY = touchY;
+      hasDragged = false;
+      console.log('Camera rotation started');
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchmove blocked - iframe is visible');
+      return;
+    }
+    
+    // Don't handle game touches when main menu is visible
+    const mainMenu = document.getElementById('main-menu');
+    if (mainMenu) {
+      const displayStyle = window.getComputedStyle(mainMenu).display;
+      if (displayStyle !== 'none') {
+        return;
+      }
+    }
+    
+    if (!isTouchRotating) return;
+    
+    // Prevent page scrolling
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - lastTouchX;
+    const deltaY = touch.clientY - lastTouchY;
+    
+    // Check if user has dragged enough to be considered camera rotation (not a tap)
+    const totalDragDistance = Math.sqrt(
+      Math.pow(touch.clientX - touchStartX, 2) + 
+      Math.pow(touch.clientY - touchStartY, 2)
+    );
+    
+    if (totalDragDistance > 10) { // Threshold for distinguishing tap from drag
+      hasDragged = true;
+    }
+    
+    const sensitivity = 0.005;
+    cameraYaw -= deltaX * sensitivity;
+    cameraPitch -= deltaY * sensitivity;
+    
+    // Clamp pitch
+    cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
+    
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchend blocked - iframe is visible');
+      return;
+    }
+    
+    // Only process tap if we were tracking a touch
+    if (!isTouchRotating) return;
+    
+    // Check if this was a tap (not dragged and quick)
+    const touchDuration = Date.now() - touchStartTime;
+    const wasTap = !hasDragged && touchDuration < 300; // Less than 300ms = tap
+    
+    if (wasTap && e.changedTouches && e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      
+      console.log('Tap detected at:', touch.clientX, touch.clientY);
+      
+      // Convert touch coordinates to normalized device coordinates
+      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+      
+      clickRaycaster.setFromCamera(mouse, camera);
+      
+      // Check for cinema button clicks
+      if (leftCinemaButton && rightCinemaButton) {
+        const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+        if (buttonIntersects.length > 0) {
+          const clickedButton = buttonIntersects[0].object;
+          if (clickedButton.userData.buttonType) {
+            console.log('Cinema button tapped:', clickedButton.userData.buttonType);
+            switchCinemaImage(clickedButton.userData.buttonType);
+            isTouchRotating = false;
+            hasDragged = false;
+            return;
+          }
+        }
+      }
+      
+      // Check if tapping on screenshot
+      if (screenshotMesh) {
+        const intersects = clickRaycaster.intersectObject(screenshotMesh);
+        if (intersects.length > 0) {
+          // Check cooldown to prevent immediate re-opening after closing
+          const timeSinceClose = Date.now() - iframeClosedTime;
+          if (timeSinceClose < IFRAME_COOLDOWN_MS) {
+            console.log('Screenshot tap blocked by cooldown:', timeSinceClose, 'ms');
+            isTouchRotating = false;
+            hasDragged = false;
+            return;
+          }
+          
+          console.log('Screenshot tapped! Opening iframe...');
+          // Tapped on screenshot - show iframe with URL based on current image
+          const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+          showVenueIframe(url);
+          isTouchRotating = false;
+          hasDragged = false;
+          return;
+        } else {
+          console.log('No intersection with screenshot');
+        }
+      }
+    }
+    
+    // Reset state
+    isTouchRotating = false;
+    hasDragged = false;
+  });
+
+  // Window resize handler
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
 
 // Function to start the game with a session ID and username
 function startGameWithSession(sessionId, username) {
@@ -2296,10 +2335,14 @@ function startGameWithSession(sessionId, username) {
     console.error('Failed to initialize multiplayer:', error);
     console.log('Running in single-player mode');
   }
+  
+  setupEventHandlers()
 
   // Start animation loop (theme music will start on first user click)
   animate();
 }
+
+
 
 // Initialize main menu instead of starting game directly
 console.log('Initializing main menu...');
