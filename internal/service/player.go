@@ -1,10 +1,12 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
 
+	"github.com/froemosen/GameJam-2025/internal/metrics"
 	"github.com/froemosen/GameJam-2025/internal/utils"
 	"github.com/gorilla/websocket"
 )
@@ -44,8 +46,32 @@ func (p *Player) WriteMessage(messageType int, data []byte) error {
 	if p.Conn == nil || p.Disconnected {
 		return fmt.Errorf("cannot write message: connection is closed")
 	}
+
+	// Track bytes sent
+	metrics.BytesSent.Add(float64(len(data)))
+
+	// Extract message type for metrics
+	var msgType string
+	var msg map[string]interface{}
+	if err := json.Unmarshal(data, &msg); err == nil {
+		if t, ok := msg["type"].(string); ok {
+			msgType = t
+		}
+	}
+	if msgType == "" {
+		msgType = "unknown"
+	}
+
 	log.Printf("Sending message to player %s: %s", p.ID, string(data))
-	return p.Conn.WriteMessage(messageType, data)
+	err := p.Conn.WriteMessage(messageType, data)
+
+	if err != nil {
+		metrics.MessageSendErrors.WithLabelValues(msgType).Inc()
+	} else {
+		metrics.MessagesSent.WithLabelValues(msgType).Inc()
+	}
+
+	return err
 }
 
 func (p *Player) CloseConnection() {

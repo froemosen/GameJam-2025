@@ -2287,8 +2287,8 @@ function setupEventHandlers() {
 }
 
 // Function to start the game with a session ID and username
-function startGameWithSession(sessionId, username) {
-  console.log('Starting game with session ID:', sessionId, 'username:', username);
+function startGameWithSession(sessionId, username, existingWebSocket = null, playerId = null, sessionPlayers = []) {
+  console.log('Starting game with session ID:', sessionId, 'username:', username, 'playerId:', playerId, 'sessionPlayers:', sessionPlayers.length);
   
   // Enable pointer lock and show the game canvas
   gameStarted = true;
@@ -2306,7 +2306,10 @@ function startGameWithSession(sessionId, username) {
 
   try {
     console.log('Creating MultiplayerClient with username:', username, 'and session:', sessionId);
-    multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel, sessionId);
+    if (existingWebSocket) {
+      console.log('Reusing existing WebSocket connection from menu with', sessionPlayers.length, 'existing players');
+    }
+    multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel, sessionId, existingWebSocket, playerId, sessionPlayers);
     console.log('Multiplayer MMO client initialized with username:', username);
     
     // Add game info display (bottom left)

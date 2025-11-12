@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/froemosen/GameJam-2025/internal/config"
+	"github.com/froemosen/GameJam-2025/internal/metrics"
 	"github.com/froemosen/GameJam-2025/internal/service"
 	"github.com/gorilla/websocket"
 )
@@ -21,9 +22,15 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
+		metrics.ConnectionErrors.Inc()
 		return
 	}
 	defer conn.Close()
+
+	// Track connection metrics
+	metrics.TotalConnections.Inc()
+	metrics.ActiveConnections.Inc()
+	defer metrics.ActiveConnections.Dec()
 
 	player := service.NewPlayer(conn)
 

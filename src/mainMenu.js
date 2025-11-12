@@ -34,12 +34,23 @@ export class MainMenu {
     if (!modal) return;
     
     modalSessionId.textContent = sessionId;
+    
+    // Pre-fill username from localStorage if available
+    const savedUsername = localStorage.getItem('gameUsername');
+    if (savedUsername && modalUsernameInput) {
+      modalUsernameInput.value = savedUsername;
+    }
+    
     modal.classList.add('show');
     
     // Focus on username input
     setTimeout(() => {
       if (modalUsernameInput) {
         modalUsernameInput.focus();
+        // If username is pre-filled, select it so user can easily change it
+        if (savedUsername) {
+          modalUsernameInput.select();
+        }
       }
     }, 300);
   }
@@ -282,11 +293,7 @@ export class MainMenu {
     const style = document.createElement('style');
     style.textContent = `
       .main-menu {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
+        position: relative;
         min-height: 100vh;
         min-height: -webkit-fill-available;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1483,6 +1490,19 @@ export class MainMenu {
         break;
       case 'sessionJoined':
         this.resetLoadingStates();
+        
+        // Store the player ID and session players for when we transition to game
+        this.playerId = data.playerId;
+        this.sessionPlayers = data.players || [];
+        console.log('Menu stored player ID:', this.playerId, 'and', this.sessionPlayers.length, 'players', 'started:', data.started);
+        
+        // If session is already started, go straight to game
+        if (data.started) {
+          console.log('Session already started, joining game directly');
+          this.startGame(data.sessionId);
+          break;
+        }
+        
         // Determine username for lobby display
         let creatorUsername = null;
         
@@ -1498,8 +1518,8 @@ export class MainMenu {
           }
         }
         
-        // Show the idling lobby
-        this.showIdlingLobby(data.sessionId, creatorUsername);
+        // Show the idling lobby with existing players
+        this.showIdlingLobby(data.sessionId, creatorUsername, data.players || []);
         break;
       case 'sessionStarted':
         // Game has started - transition from lobby to game
@@ -1509,12 +1529,22 @@ export class MainMenu {
         // Handle when a player joins any session (for live updates in idling lobby)
         if (this.currentSessionId && data.player) {
           this.addPlayerToSession(data.player);
+          // Keep our session players list in sync
+          if (this.sessionPlayers && !this.sessionPlayers.find(p => p.id === data.player.id)) {
+            this.sessionPlayers.push(data.player);
+            console.log('Added player to session list, now', this.sessionPlayers.length, 'players');
+          }
         }
         break;
       case 'playerLeft':
         // Handle when a player leaves any session
         if (this.currentSessionId && data.id) {
           this.removePlayerFromSession(data.id);
+          // Keep our session players list in sync
+          if (this.sessionPlayers) {
+            this.sessionPlayers = this.sessionPlayers.filter(p => p.id !== data.id);
+            console.log('Removed player from session list, now', this.sessionPlayers.length, 'players');
+          }
         }
         break;
       case 'error':
@@ -1690,7 +1720,7 @@ export class MainMenu {
     }
   }
   
-  showIdlingLobby(sessionId, creatorUsername) {
+  showIdlingLobby(sessionId, creatorUsername, existingPlayers = []) {
     this.currentSessionId = sessionId;
     this.isCreator = !!creatorUsername;
     
@@ -1711,6 +1741,23 @@ export class MainMenu {
       lobbyContainer.id = 'idling-lobby';
       lobbyContainer.className = 'idling-lobby';
       document.querySelector('.menu-container').appendChild(lobbyContainer);
+    }
+    
+    // Generate player list HTML
+    let playersHTML = '';
+    if (existingPlayers.length === 0) {
+      playersHTML = '<div class="no-players">Waiting for players...</div>';
+    } else {
+      playersHTML = existingPlayers.map(player => {
+        const initial = (player.username || 'U').charAt(0).toUpperCase();
+        return `
+          <div class="player-item" data-player-id="${player.id}">
+            <div class="player-avatar">${initial}</div>
+            <div class="player-name">${this.escapeHtml(player.username || 'Unknown')}</div>
+            <div class="player-status">Ready</div>
+          </div>
+        `;
+      }).join('');
     }
     
     const lobbyHTML = `
@@ -1749,10 +1796,10 @@ export class MainMenu {
         <div class="lobby-players-section">
           <h3>
             <span>👥 Players in Lobby</span>
-            <span class="player-count-badge" id="lobby-player-count">0</span>
+            <span class="player-count-badge" id="lobby-player-count">${existingPlayers.length}</span>
           </h3>
           <div class="players-list" id="lobby-players-list">
-            <div class="no-players">Waiting for players...</div>
+            ${playersHTML}
           </div>
         </div>
       </div>
@@ -1908,8 +1955,8 @@ export class MainMenu {
   startGame(sessionId) {
     console.log('Starting game in session:', sessionId);
     
-    // Close menu WebSocket (game will create its own)
-    this.closeWS();
+    // DON'T close the WebSocket - we'll reuse it in the game!
+    // The game will take over this connection
     
     // Get username from input
     const usernameInput = document.getElementById('username-input');
@@ -1920,8 +1967,8 @@ export class MainMenu {
     setTimeout(() => {
       this.menuElement.style.display = 'none';
       
-      // Start the game with session ID and username
-      this.onStartGame(sessionId, username);
+      // Start the game with session ID, username, existing WebSocket, player ID, and session players
+      this.onStartGame(sessionId, username, this.ws, this.playerId, this.sessionPlayers || []);
     }, 300);
   }
   

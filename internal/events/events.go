@@ -9,6 +9,7 @@ const (
 	UpdateSessionList = "updateSessionList"
 	SessionCreated    = "sessionCreated"
 	SessionJoined     = "sessionJoined"
+	SessionStarted    = "sessionStarted"
 	PlayerJoined      = "playerJoined"
 	PlayerUpdated     = "playerUpdate"
 	PlayerLeft        = "playerLeft"
@@ -65,12 +66,13 @@ func FormatCreateSession(sessionID, sessionName string) []byte {
 	return payload
 }
 
-func FormatJoinSession(sessionID, playerID string, existingPlayers []map[string]interface{}) []byte {
+func FormatJoinSession(sessionID, playerID string, existingPlayers []map[string]interface{}, started bool) []byte {
 	response, err := json.Marshal(map[string]interface{}{
 		"type":      SessionJoined,
 		"sessionId": sessionID,
 		"playerId":  playerID,
 		"players":   existingPlayers,
+		"started":   started,
 	})
 	if err != nil {
 		log.Printf("Error marshaling session joined message: %v", err)
@@ -116,6 +118,18 @@ func FormatPlaySound(playerID, soundType string, position map[string]float64) []
 	})
 	if err != nil {
 		log.Printf("Error marshaling play sound message: %v", err)
+		return nil
+	}
+	return response
+}
+
+func FormatSessionStarted(sessionID string) []byte {
+	response, err := json.Marshal(map[string]interface{}{
+		"type":      SessionStarted,
+		"sessionId": sessionID,
+	})
+	if err != nil {
+		log.Printf("Error marshaling session started message: %v", err)
 		return nil
 	}
 	return response

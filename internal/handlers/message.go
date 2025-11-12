@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/froemosen/GameJam-2025/internal/config"
+	"github.com/froemosen/GameJam-2025/internal/metrics"
 	"github.com/froemosen/GameJam-2025/internal/service"
 	"github.com/gorilla/websocket"
 )
@@ -14,6 +15,7 @@ const (
 	GetSessions   = "listSessions"
 	CreateSession = "createSession"
 	JoinSession   = "joinSession"
+	StartSession  = "startSession"
 	UpdatePlayer  = "update"
 	PlayerSound   = "sound"
 )
@@ -56,13 +58,23 @@ func handlePlayerMessages(player *service.Player) {
 			// Reset read deadline on each message
 			player.Conn.SetReadDeadline(time.Now().Add(config.ReadTimeout))
 
+			// Track bytes received
+			metrics.BytesReceived.Add(float64(len(messageData)))
+
 			var msg service.Message
 			if err := json.Unmarshal(messageData, &msg); err != nil {
 				log.Printf("Error parsing message from player %s: %v", player.ID, err)
 				continue
 			}
 
+			// Track message received
+			metrics.MessagesReceived.WithLabelValues(msg.Type).Inc()
+
+			// Track processing duration
+			start := time.Now()
 			handleMessage(player, &msg)
+			duration := time.Since(start).Seconds()
+			metrics.MessageProcessingDuration.WithLabelValues(msg.Type).Observe(duration)
 
 		case err := <-errorChan:
 			// Only log unexpected errors (not normal closes)
@@ -95,6 +107,8 @@ func handleMessage(player *service.Player, msg *service.Message) {
 		handleCreateSession(player, msg)
 	case JoinSession:
 		handleJoinSession(player, msg)
+	case StartSession:
+		handleStartSession(player, msg)
 	case UpdatePlayer:
 		handleUpdate(player, msg)
 	case PlayerSound:

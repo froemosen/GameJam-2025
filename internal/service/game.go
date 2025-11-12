@@ -7,6 +7,7 @@ import (
 
 	"github.com/froemosen/GameJam-2025/internal/config"
 	"github.com/froemosen/GameJam-2025/internal/events"
+	"github.com/froemosen/GameJam-2025/internal/metrics"
 	"github.com/gorilla/websocket"
 )
 
@@ -96,6 +97,9 @@ func (s *GameState) RemoveSession(sessionID string) {
 	delete(s.Sessions, sessionID)
 	s.mu.Unlock()
 
+	// Track session deletion
+	metrics.ActiveSessions.Dec()
+
 	payload := events.FormatUpdateSessionList(s.ListSessions())
 	s.Broadcast(payload)
 
@@ -133,11 +137,12 @@ func CleanupLoop() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Only cleanup inactive sessions - players are removed immediately on disconnect
+		// Cleanup: Only remove started sessions that are empty
+		// Idling sessions are deleted when the creator leaves (not via timeout)
 		State.mu.RLock()
 		sessionsToRemove := make([]string, 0)
 		for sessionID, session := range State.Sessions {
-			if session.IsEmpty() {
+			if session.IsEmpty() && session.IsStarted() {
 				sessionsToRemove = append(sessionsToRemove, sessionID)
 			}
 		}
@@ -146,7 +151,7 @@ func CleanupLoop() {
 		if len(sessionsToRemove) > 0 {
 			for _, sessionID := range sessionsToRemove {
 				State.RemoveSession(sessionID)
-				log.Printf("Session %s deleted (no players)", sessionID)
+				log.Printf("Session %s deleted (started but no players)", sessionID)
 			}
 		}
 	}

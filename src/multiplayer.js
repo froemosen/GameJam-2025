@@ -2,26 +2,90 @@
 // Handles connection, player synchronization, and network updates
 
 export class MultiplayerClient {
-  constructor(scene, camera, localPlayer, username = null, mohamedModel = null, sessionId = null) {
+  constructor(scene, camera, localPlayer, username = null, mohamedModel = null, sessionId = null, existingWebSocket = null, playerId = null, sessionPlayers = []) {
     this.scene = scene;
     this.camera = camera;
     this.localPlayer = localPlayer;
     this.mohamedModel = mohamedModel;
     this.username = username || 'Player' + Math.floor(Math.random() * 1000);
     this.sessionId = sessionId; // Game session ID for isolated multiplayer rooms
-    this.ws = null;
-    this.playerId = null;
+    this.ws = existingWebSocket; // Reuse existing WebSocket if provided
+    this.playerId = playerId; // Use existing player ID from menu if provided
     this.remotePlayers = new Map();
     this.updateInterval = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 2000;
     
-    this.connect();
+    // Network optimization: Track last sent state to avoid redundant updates
+    this.lastSentState = {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { y: 0 },
+      modelRotation: { y: 0 },
+      animation: 'idle'
+    };
+    this.positionThreshold = 0.01; // Only send if moved more than 1cm
+    this.rotationThreshold = 0.05; // Only send if rotated more than ~3 degrees
+    
+    if (this.ws) {
+      // Reusing existing WebSocket from menu
+      console.log('Reusing existing WebSocket connection with player ID:', this.playerId, 'and', sessionPlayers.length, 'existing players');
+      this.setupExistingConnection(sessionPlayers);
+    } else {
+      // Create new connection
+      this.connect();
+    }
   }
   
   setMohamedModel(model) {
     this.mohamedModel = model;
+  }
+  
+  setupExistingConnection(sessionPlayers = []) {
+    // Take over the existing WebSocket connection from the menu
+    console.log('Setting up existing WebSocket connection for game');
+    
+    // The player is already in the session, so we don't need to send joinSession
+    // Just take over the message handlers for game-specific logic
+    
+    // Set up new message handler for game
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.handleMessage(data);
+      } catch (error) {
+        console.error('Error parsing server message:', error);
+      }
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    this.ws.onclose = (event) => {
+      // Only log unexpected disconnections (not normal closes)
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log('Disconnected from MMO server (code:', event.code, ')');
+      }
+      this.stopUpdateLoop();
+      this.attemptReconnect();
+    };
+    
+    // Load existing players from the session (excluding ourselves)
+    if (sessionPlayers && sessionPlayers.length > 0) {
+      console.log('Loading', sessionPlayers.length, 'existing players from session');
+      sessionPlayers.forEach(playerData => {
+        if (playerData.id !== this.playerId) {
+          console.log('Adding remote player:', playerData.id, playerData.username);
+          this.addRemotePlayer(playerData);
+        }
+      });
+    }
+    
+    // Start sending position updates
+    this.startUpdateLoop();
+    
+    console.log('Existing WebSocket connection ready for game use');
   }
   
   connect() {
@@ -465,10 +529,11 @@ export class MultiplayerClient {
   }
   
   startUpdateLoop() {
-    // Send updates to server at 20 Hz
+    // Send updates to server at 10 Hz (industry standard for most games)
+    // Reduced from 20 Hz to cut bandwidth in half
     this.updateInterval = setInterval(() => {
       this.sendUpdate();
-    }, 50);
+    }, 100); // 10 updates per second
   }
   
   stopUpdateLoop() {
@@ -480,8 +545,7 @@ export class MultiplayerClient {
   
   sendUpdate() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.localPlayer) {
-      const update = {
-        type: 'update',
+      const currentState = {
         position: {
           x: this.localPlayer.position.x,
           y: this.localPlayer.position.y,
@@ -496,7 +560,38 @@ export class MultiplayerClient {
         animation: this.getCurrentAnimation()
       };
       
-      this.ws.send(JSON.stringify(update));
+      // OPTIMIZATION 1: Delta compression - only send if something changed significantly
+      const positionChanged = 
+        Math.abs(currentState.position.x - this.lastSentState.position.x) > this.positionThreshold ||
+        Math.abs(currentState.position.y - this.lastSentState.position.y) > this.positionThreshold ||
+        Math.abs(currentState.position.z - this.lastSentState.position.z) > this.positionThreshold;
+      
+      const rotationChanged = 
+        Math.abs(currentState.rotation.y - this.lastSentState.rotation.y) > this.rotationThreshold ||
+        Math.abs(currentState.modelRotation.y - this.lastSentState.modelRotation.y) > this.rotationThreshold;
+      
+      const animationChanged = currentState.animation !== this.lastSentState.animation;
+      
+      // Only send update if something actually changed
+      if (positionChanged || rotationChanged || animationChanged) {
+        const update = {
+          type: 'update',
+          position: currentState.position,
+          rotation: currentState.rotation,
+          modelRotation: currentState.modelRotation,
+          animation: currentState.animation
+        };
+        
+        this.ws.send(JSON.stringify(update));
+        
+        // Update last sent state
+        this.lastSentState = {
+          position: { ...currentState.position },
+          rotation: { ...currentState.rotation },
+          modelRotation: { ...currentState.modelRotation },
+          animation: currentState.animation
+        };
+      }
     }
   }
   
