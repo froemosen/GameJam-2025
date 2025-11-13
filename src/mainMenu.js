@@ -1850,7 +1850,7 @@ export class MainMenu {
   }
   
   copySessionId(sessionId) {
-    navigator.clipboard.writeText(sessionId).then(() => {
+    navigator.clipboard.writeText(`${window.location.origin}?join=${sessionId}`).then(() => {
       this.showSuccess('Session ID copied to clipboard!');
     }).catch(() => {
       this.showError('Failed to copy session ID');
