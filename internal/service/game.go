@@ -94,10 +94,18 @@ func (s *GameState) AddSession(session *GameSession) {
 
 func (s *GameState) RemoveSession(sessionID string) {
 	s.mu.Lock()
+	// Check if session exists before removing
+	_, exists := s.Sessions[sessionID]
+	if !exists {
+		s.mu.Unlock()
+		log.Printf("Session %s does not exist, skipping removal", sessionID)
+		return
+	}
+
 	delete(s.Sessions, sessionID)
 	s.mu.Unlock()
 
-	// Track session deletion
+	// Track session deletion (only if it actually existed)
 	metrics.ActiveSessions.Dec()
 
 	payload := events.FormatUpdateSessionList(s.ListSessions())

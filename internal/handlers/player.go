@@ -65,10 +65,13 @@ func HandleDisconnect(player *service.Player) {
 		// Remove from spatial grid
 		session.Grid.RemovePlayer(player.ID)
 
+		// RemovePlayer will handle session cleanup if creator leaves idling session
+		// or if session becomes empty after removal
 		session.RemovePlayer(player.ID)
 
-		// Clean up empty sessions
-		if session.IsEmpty() {
+		// Note: RemovePlayer already calls State.RemoveSession() when appropriate
+		// (when creator leaves idling session), so we only clean up empty STARTED sessions here
+		if session.IsEmpty() && session.IsStarted() {
 			service.State.RemoveSession(session.ID)
 		}
 	} else {
