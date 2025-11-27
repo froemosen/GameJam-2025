@@ -1,0 +1,769 @@
+// Multiplayer client using WebSockets
+// Handles connection, player synchronization, and network updates
+
+export class MultiplayerClient {
+  constructor(scene, camera, localPlayer, username = null, mohamedModel = null, sessionId = null, existingWebSocket = null, playerId = null, sessionPlayers = []) {
+    this.scene = scene;
+    this.camera = camera;
+    this.localPlayer = localPlayer;
+    this.mohamedModel = mohamedModel;
+    this.username = username || 'Player' + Math.floor(Math.random() * 1000);
+    this.sessionId = sessionId; // Game session ID for isolated multiplayer rooms
+    this.ws = existingWebSocket; // Reuse existing WebSocket if provided
+    this.playerId = playerId; // Use existing player ID from menu if provided
+    this.remotePlayers = new Map();
+    this.updateInterval = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 2000;
+    
+    // Network optimization: Track last sent state to avoid redundant updates
+    this.lastSentState = {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { y: 0 },
+      modelRotation: { y: 0 },
+      animation: 'idle'
+    };
+    this.positionThreshold = 0.01; // Only send if moved more than 1cm
+    this.rotationThreshold = 0.05; // Only send if rotated more than ~3 degrees
+    
+    if (this.ws) {
+      // Reusing existing WebSocket from menu
+      console.log('Reusing existing WebSocket connection with player ID:', this.playerId, 'and', sessionPlayers.length, 'existing players');
+      this.setupExistingConnection(sessionPlayers);
+    } else {
+      // Create new connection
+      this.connect();
+    }
+  }
+  
+  setMohamedModel(model) {
+    this.mohamedModel = model;
+  }
+  
+  setupExistingConnection(sessionPlayers = []) {
+    // Take over the existing WebSocket connection from the menu
+    console.log('Setting up existing WebSocket connection for game');
+    
+    // The player is already in the session, so we don't need to send joinSession
+    // Just take over the message handlers for game-specific logic
+    
+    // Set up new message handler for game
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.handleMessage(data);
+      } catch (error) {
+        console.error('Error parsing server message:', error);
+      }
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    this.ws.onclose = (event) => {
+      // Only log unexpected disconnections (not normal closes)
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log('Disconnected from MMO server (code:', event.code, ')');
+      }
+      this.stopUpdateLoop();
+      this.attemptReconnect();
+    };
+    
+    // Load existing players from the session (excluding ourselves)
+    if (sessionPlayers && sessionPlayers.length > 0) {
+      console.log('Loading', sessionPlayers.length, 'existing players from session');
+      sessionPlayers.forEach(playerData => {
+        if (playerData.id !== this.playerId) {
+          console.log('Adding remote player:', playerData.id, playerData.username);
+          this.addRemotePlayer(playerData);
+        }
+      });
+    }
+    
+    // Start sending position updates
+    this.startUpdateLoop();
+    
+    console.log('Existing WebSocket connection ready for game use');
+  }
+  
+  connect() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    console.log('Connecting to MMO server:', wsUrl);
+    
+    try {
+      this.ws = new WebSocket(wsUrl);
+      
+      this.ws.onopen = () => {
+        console.log('Connected to MMO server!');
+        console.log('My username is:', this.username);
+        console.log('My session ID is:', this.sessionId);
+        this.reconnectAttempts = 0;
+        
+        // Send session join request to server
+        const joinMessage = {
+          type: 'joinSession',
+          sessionId: this.sessionId,
+          username: this.username
+        };
+        console.log('Joining session:', joinMessage);
+        this.ws.send(JSON.stringify(joinMessage));
+        
+        this.startUpdateLoop();
+      };
+      
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleMessage(data);
+        } catch (error) {
+          console.error('Error parsing server message:', error);
+        }
+      };
+      
+      this.ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+      
+      this.ws.onclose = (event) => {
+        // Only log unexpected disconnections (not normal closes)
+        if (event.code !== 1000 && event.code !== 1001) {
+          console.log('Disconnected from MMO server (code:', event.code, ')');
+        }
+        this.stopUpdateLoop();
+        this.attemptReconnect();
+      };
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error);
+      this.attemptReconnect();
+    }
+  }
+
+  closeWS() {
+    if (this.ws) {
+      this.ws.dispatchEvent(new CloseEvent('close', {code: 1000, reason: 'Disconnected from game'}));
+      this.ws.close();
+    }
+  }
+
+  sendWSMessage(message) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+  
+  attemptReconnect() {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      console.log(`Reconnecting... Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      setTimeout(() => this.connect(), this.reconnectDelay);
+    } else {
+      console.error('Max reconnection attempts reached');
+    }
+  }
+  
+  handleMessage(data) {
+    switch (data.type) {
+      case 'sessionJoined':
+        // Handle session join response
+        this.playerId = data.playerId;
+        console.log('Joined session:', data.sessionId, 'with player ID:', this.playerId);
+        
+        // Add existing players in the session
+        if (data.players && data.players.length > 0) {
+          console.log('Adding', data.players.length, 'existing players');
+          data.players.forEach(playerData => {
+            this.addRemotePlayer(playerData);
+          });
+        }
+        break;
+      case 'playerJoined':
+        console.log('Player joined:', data.player.id);
+        this.addRemotePlayer(data.player);
+        break;
+        
+      case 'playerLeft':
+        console.log('Player left:', data.id);
+        this.removeRemotePlayer(data.id);
+        break;
+        
+      case 'playerUpdate':
+        this.updateRemotePlayer(data);
+        break;
+        
+      case 'playSound':
+        this.playRemoteSound(data);
+        break;
+    }
+  }
+  
+  addRemotePlayer(playerData) {
+    if (playerData.id === this.playerId) {
+        return; // Don't add ourselves
+    }
+    if (this.remotePlayers.has(playerData.id)) {
+      console.log(`Remote player ${playerData.id} already exists, skipping`);
+      return; // Player already exists
+    }
+    
+    console.log(`Adding remote player ${playerData.id} (${playerData.username || 'no name'})`);
+    
+    // Import THREE from global scope
+    const THREE = window.THREE;
+    
+    // Create a simple representation for remote player
+    const playerGroup = new THREE.Object3D();
+    playerGroup.position.set(
+      playerData.position.x,
+      playerData.position.y,
+      playerData.position.z
+    );
+    playerGroup.rotation.y = playerData.rotation.y;
+    
+    // Create a temporary placeholder box until Mohamed model loads
+    const geometry = new THREE.BoxGeometry(1, 2, 1);
+    const material = new THREE.MeshStandardMaterial({
+      color: this.getRandomPlayerColor(),
+      metalness: 0.3,
+      roughness: 0.7
+    });
+    const tempMesh = new THREE.Mesh(geometry, material);
+    tempMesh.position.y = 1;
+    tempMesh.castShadow = true;
+    tempMesh.receiveShadow = true;
+    playerGroup.add(tempMesh);
+    
+    // Add name tag (use username if available, otherwise use ID)
+    const playerName = playerData.username || playerData.id.substring(0, 8);
+    const nameTag = this.createNameTag(playerName);
+    nameTag.position.y = 3;
+    playerGroup.add(nameTag);
+    
+    this.scene.add(playerGroup);
+    
+    const playerState = {
+      group: playerGroup,
+      mesh: tempMesh,
+      targetPosition: { ...playerData.position },
+      targetRotation: { ...playerData.rotation },
+      targetModelRotation: playerData.modelRotation ? { ...playerData.modelRotation } : { y: 0 },
+      currentAnimation: playerData.animation || 'idle',
+      mixer: null,
+      animations: {}
+    };
+    
+    this.remotePlayers.set(playerData.id, playerState);
+    
+    // Load Mohamed model for remote player (same as local player)
+    this.loadMohamedForPlayer(playerData.id, playerState);
+  }
+  
+  setupRemotePlayerFromCache(playerId, playerState, cache) {
+    const THREE = window.THREE;
+    const SkeletonUtils = window.SkeletonUtils;
+    
+    console.log(`Setting up remote player ${playerId} from cache...`);
+    
+    // Check if player still exists
+    if (!this.remotePlayers.has(playerId)) {
+      console.warn(`Player ${playerId} no longer exists, aborting setup`);
+      return;
+    }
+    
+    // Clone the character model from cache using SkeletonUtils for proper skinned mesh cloning
+    const mohamedModel = SkeletonUtils.clone(cache.character.scene);
+    console.log(`Cloned Mohamed model for player ${playerId}`);
+    
+    mohamedModel.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    
+    // Remove temp box placeholder
+    if (playerState.mesh) {
+      playerState.group.remove(playerState.mesh);
+      console.log(`Removed placeholder for player ${playerId}`);
+    }
+    
+    // Add Mohamed model
+    playerState.group.add(mohamedModel);
+    playerState.mesh = mohamedModel;
+    console.log(`Added Mohamed model to player ${playerId} group`);
+    
+    // Setup animation mixer with cached animations
+    playerState.mixer = new THREE.AnimationMixer(mohamedModel);
+    playerState.animations.idle = playerState.mixer.clipAction(cache.idle.animations[0]);
+    playerState.animations.walk = playerState.mixer.clipAction(cache.walk.animations[0]);
+    playerState.animations.run = playerState.mixer.clipAction(cache.run.animations[0]);
+    playerState.animations.swim = playerState.mixer.clipAction(cache.swim.animations[0]);
+    
+    // Special animations - set to play once (not loop)
+    playerState.animations.agree = playerState.mixer.clipAction(cache.agree.animations[0]);
+    playerState.animations.agree.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.agree.clampWhenFinished = true;
+    
+    playerState.animations.dance = playerState.mixer.clipAction(cache.dance.animations[0]);
+    playerState.animations.dance.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.dance.clampWhenFinished = true;
+    
+    playerState.animations.boom = playerState.mixer.clipAction(cache.boom.animations[0]);
+    playerState.animations.boom.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.boom.clampWhenFinished = true;
+    
+    playerState.animations.boxing = playerState.mixer.clipAction(cache.boxing.animations[0]);
+    playerState.animations.boxing.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.boxing.clampWhenFinished = true;
+    
+    playerState.animations.dead = playerState.mixer.clipAction(cache.dead.animations[0]);
+    playerState.animations.dead.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.dead.clampWhenFinished = true;
+    
+    playerState.animations.skill = playerState.mixer.clipAction(cache.skill.animations[0]);
+    playerState.animations.skill.setLoop(THREE.LoopOnce, 1);
+    playerState.animations.skill.clampWhenFinished = true;
+    
+    // Start with idle animation
+    playerState.animations.idle.play();
+    playerState.currentAction = playerState.animations.idle;
+    
+    console.log(`Remote player ${playerId} setup complete using cached animations (FAST)`);
+  }
+  
+  loadMohamedForPlayer(playerId, playerState) {
+    const THREE = window.THREE;
+    const GLTFLoader = window.GLTFLoader;
+    const DRACOLoader = window.DRACOLoader;
+    const MeshoptDecoder = window.MeshoptDecoder;
+    
+    // Check if we have cached animations from local player
+    if (window.mohamedAnimationCache) {
+      console.log(`✅ Using cached Mohamed model for remote player ${playerId}`);
+      this.setupRemotePlayerFromCache(playerId, playerState, window.mohamedAnimationCache);
+      return;
+    }
+    
+    if (!GLTFLoader) {
+      console.warn('❌ GLTFLoader not available, using box placeholder');
+      return;
+    }
+    
+    console.warn(`⚠️ Cache not available yet, loading Mohamed model from scratch for remote player ${playerId}`);
+    
+    const loader = new GLTFLoader();
+    
+    // Setup DRACO loader if available
+    if (DRACOLoader) {
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      dracoLoader.setDecoderConfig({ type: 'js' });
+      loader.setDRACOLoader(dracoLoader);
+    }
+    
+    // Setup Meshopt decoder if available
+    if (MeshoptDecoder) {
+      loader.setMeshoptDecoder(MeshoptDecoder);
+    }
+    
+    // Load Mohamed model and animations for remote player
+    Promise.all([
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Character_output.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Idle_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Walking_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Running_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Run_03_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Agree_Gesture_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_All_Night_Dance_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Boom_Dance_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Boxing_Practice_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Dead_withSkin.glb', resolve, undefined, reject);
+      }),
+      new Promise((resolve, reject) => {
+        loader.load('./assets/mohamed/Animation_Skill_01_withSkin.glb', resolve, undefined, reject);
+      })
+    ]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf, agreeGltf, danceGltf, boomGltf, boxingGltf, deadGltf, skillGltf]) => {
+      // Check if player still exists (might have disconnected during loading)
+      if (!this.remotePlayers.has(playerId)) {
+        return;
+      }
+      
+      const mohamedModel = characterGltf.scene;
+      mohamedModel.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      
+      // Remove temp box placeholder
+      playerState.group.remove(playerState.mesh);
+      
+      // Add Mohamed model
+      playerState.group.add(mohamedModel);
+      playerState.mesh = mohamedModel;
+      
+      // Setup animation mixer
+      playerState.mixer = new THREE.AnimationMixer(mohamedModel);
+      playerState.animations.idle = playerState.mixer.clipAction(idleGltf.animations[0]);
+      playerState.animations.walk = playerState.mixer.clipAction(walkGltf.animations[0]);
+      playerState.animations.run = playerState.mixer.clipAction(runGltf.animations[0]);
+      playerState.animations.swim = playerState.mixer.clipAction(swimGltf.animations[0]);
+      
+      // Special animations - set to play once (not loop) - same as local player
+      playerState.animations.agree = playerState.mixer.clipAction(agreeGltf.animations[0]);
+      playerState.animations.agree.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.agree.clampWhenFinished = true;
+      
+      playerState.animations.dance = playerState.mixer.clipAction(danceGltf.animations[0]);
+      playerState.animations.dance.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.dance.clampWhenFinished = true;
+      
+      playerState.animations.boom = playerState.mixer.clipAction(boomGltf.animations[0]);
+      playerState.animations.boom.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.boom.clampWhenFinished = true;
+      
+      playerState.animations.boxing = playerState.mixer.clipAction(boxingGltf.animations[0]);
+      playerState.animations.boxing.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.boxing.clampWhenFinished = true;
+      
+      playerState.animations.dead = playerState.mixer.clipAction(deadGltf.animations[0]);
+      playerState.animations.dead.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.dead.clampWhenFinished = true;
+      
+      playerState.animations.skill = playerState.mixer.clipAction(skillGltf.animations[0]);
+      playerState.animations.skill.setLoop(THREE.LoopOnce, 1);
+      playerState.animations.skill.clampWhenFinished = true;
+      
+      // Start with idle animation
+      playerState.animations.idle.play();
+      playerState.currentAction = playerState.animations.idle;
+      
+      console.log(`Mohamed model loaded for remote player ${playerId}`);
+    }).catch(err => {
+      console.error(`Error loading Mohamed for player ${playerId}:`, err);
+      console.error('Error details:', {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
+      // Keep using box placeholder if model fails to load
+    });
+  }
+  
+  createNameTag(playerName) {
+    const THREE = window.THREE;
+    
+    // Create canvas for name
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(playerName, canvas.width / 2, canvas.height / 2);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(2, 0.5, 1);
+    
+    return sprite;
+  }
+  
+  getRandomPlayerColor() {
+    const colors = [0x4a90e2, 0xe24a4a, 0x4ae24a, 0xe2e24a, 0xe24ae2, 0x4ae2e2];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+  
+  removeRemotePlayer(playerId) {
+    const player = this.remotePlayers.get(playerId);
+    if (player) {
+      this.scene.remove(player.group);
+      this.remotePlayers.delete(playerId);
+    }
+  }
+  
+  updateRemotePlayer(data) {
+    const player = this.remotePlayers.get(data.id);
+    if (player) {
+      // Smooth interpolation target
+      player.targetPosition = data.position;
+      player.targetRotation = data.rotation;
+      player.targetModelRotation = data.modelRotation || { y: 0 };
+      
+      // Update animation if it changed
+      if (player.currentAnimation !== data.animation) {
+        console.log(`Player ${data.id} animation changed: ${player.currentAnimation} -> ${data.animation}`);
+        player.currentAnimation = data.animation;
+      }
+    }
+  }
+  
+  startUpdateLoop() {
+    // Send updates to server at 10 Hz (industry standard for most games)
+    // Reduced from 20 Hz to cut bandwidth in half
+    this.updateInterval = setInterval(() => {
+      this.sendUpdate();
+    }, 100); // 10 updates per second
+  }
+  
+  stopUpdateLoop() {
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+  }
+  
+  sendUpdate() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.localPlayer) {
+      const currentState = {
+        position: {
+          x: this.localPlayer.position.x,
+          y: this.localPlayer.position.y,
+          z: this.localPlayer.position.z
+        },
+        rotation: {
+          y: this.localPlayer.rotation.y
+        },
+        modelRotation: this.mohamedModel ? {
+          y: this.mohamedModel.rotation.y
+        } : { y: 0 },
+        animation: this.getCurrentAnimation()
+      };
+      
+      // OPTIMIZATION 1: Delta compression - only send if something changed significantly
+      const positionChanged = 
+        Math.abs(currentState.position.x - this.lastSentState.position.x) > this.positionThreshold ||
+        Math.abs(currentState.position.y - this.lastSentState.position.y) > this.positionThreshold ||
+        Math.abs(currentState.position.z - this.lastSentState.position.z) > this.positionThreshold;
+      
+      const rotationChanged = 
+        Math.abs(currentState.rotation.y - this.lastSentState.rotation.y) > this.rotationThreshold ||
+        Math.abs(currentState.modelRotation.y - this.lastSentState.modelRotation.y) > this.rotationThreshold;
+      
+      const animationChanged = currentState.animation !== this.lastSentState.animation;
+      
+      // Only send update if something actually changed
+      if (positionChanged || rotationChanged || animationChanged) {
+        const update = {
+          type: 'update',
+          position: currentState.position,
+          rotation: currentState.rotation,
+          modelRotation: currentState.modelRotation,
+          animation: currentState.animation
+        };
+        
+        this.ws.send(JSON.stringify(update));
+        
+        // Update last sent state
+        this.lastSentState = {
+          position: { ...currentState.position },
+          rotation: { ...currentState.rotation },
+          modelRotation: { ...currentState.modelRotation },
+          animation: currentState.animation
+        };
+      }
+    }
+  }
+  
+  getCurrentAnimation() {
+    // This will be set from the main game loop
+    return this.currentAnimation || 'idle';
+  }
+  
+  setCurrentAnimation(animation) {
+    this.currentAnimation = animation;
+  }
+  
+  triggerSound(soundType) {
+    // Send sound trigger to other players
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (!['agree', 'dance', 'boom', 'boxing', 'dead', 'skill'].includes(soundType)) {
+        console.warn(`Unknown sound type: ${soundType}`);
+        return;
+      }
+      const soundMessage = {
+        type: 'sound',
+        soundType: soundType,
+        position: {
+          x: this.localPlayer.position.x,
+          y: this.localPlayer.position.y,
+          z: this.localPlayer.position.z
+        }
+      };
+      this.ws.send(JSON.stringify(soundMessage));
+    }
+  }
+  
+  playRemoteSound(data) {
+    // Play positional audio for remote player sounds
+    const THREE = window.THREE;
+    
+    // Don't play our own sounds
+    if (data.id === this.playerId) {
+      return;
+    }
+    
+    console.log(`Playing sound ${data.soundType} from player ${data.id}`);
+    
+    // Create a temporary audio source at the player's position
+    const audioListener = this.camera.children.find(child => child.type === 'AudioListener');
+    if (!audioListener) {
+      console.warn('No audio listener found on camera');
+      return;
+    }
+    
+    const sound = new THREE.PositionalAudio(audioListener);
+    sound.setRefDistance(10); // Distance at which volume is 100%
+    sound.setMaxDistance(50); // Maximum distance for sound attenuation
+    sound.setRolloffFactor(1.5); // How quickly the sound attenuates with distance
+    sound.setDistanceModel('exponential'); // Exponential falloff for dramatic distance effect
+    
+    // Create a temporary object at the sound position
+    const soundSource = new THREE.Object3D();
+    soundSource.position.set(data.position.x, data.position.y, data.position.z);
+    this.scene.add(soundSource);
+    soundSource.add(sound);
+    
+    // Load and play the appropriate sound
+    const audioLoader = new THREE.AudioLoader();
+    let soundFile = null;
+    
+    switch (data.soundType) {
+      case 'agree':
+        soundFile = './assets/sounds/agree.wav';
+        break;
+      case 'dance':
+        soundFile = './assets/sounds/dance.wav';
+        break;
+      case 'boom':
+        soundFile = './assets/sounds/boom.wav';
+        break;
+      case 'boxing':
+        soundFile = './assets/sounds/boxing.wav';
+        break;
+      case 'dead':
+        soundFile = './assets/sounds/dead.wav';
+        break;
+      case 'skill':
+        soundFile = './assets/sounds/skill.wav';
+        break;
+    }
+    
+    if (soundFile) {
+      audioLoader.load(soundFile, (buffer) => {
+        sound.setBuffer(buffer);
+        sound.setVolume(0.5);
+        sound.play();
+        
+        // Remove the temporary object after the sound finishes
+        setTimeout(() => {
+          this.scene.remove(soundSource);
+        }, buffer.duration * 1000 + 100);
+      }, undefined, (error) => {
+        console.warn(`Could not load sound ${soundFile}:`, error);
+        console.warn('Sound file may not exist yet. You can add custom sounds to assets/sounds/');
+        this.scene.remove(soundSource);
+      });
+    } else {
+      this.scene.remove(soundSource);
+    }
+  }
+  
+  update(delta) {
+    // Smooth interpolation for remote players
+    this.remotePlayers.forEach((player) => {
+      // Update animation mixer if available
+      if (player.mixer) {
+        player.mixer.update(delta);
+        
+        // Update animation based on current state
+        if (player.animations && player.currentAnimation) {
+          const targetAnim = player.animations[player.currentAnimation];
+          if (targetAnim && player.currentAction !== targetAnim) {
+            // Fade to new animation
+            console.log(`Switching remote player animation to: ${player.currentAnimation}`);
+            if (player.currentAction) {
+              player.currentAction.fadeOut(0.3);
+            }
+            targetAnim.reset().fadeIn(0.3).play();
+            player.currentAction = targetAnim;
+          }
+        }
+      }
+      
+      // Lerp position
+      player.group.position.x += (player.targetPosition.x - player.group.position.x) * 0.3;
+      player.group.position.y += (player.targetPosition.y - player.group.position.y) * 0.3;
+      player.group.position.z += (player.targetPosition.z - player.group.position.z) * 0.3;
+      
+      // Lerp rotation (container)
+      let targetY = player.targetRotation.y;
+      let currentY = player.group.rotation.y;
+      
+      // Handle angle wrapping
+      let diff = targetY - currentY;
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      
+      player.group.rotation.y += diff * 0.3;
+      
+      // Lerp Mohamed model rotation (the actual character facing direction)
+      if (player.mesh && player.mesh.rotation && player.targetModelRotation) {
+        let targetModelY = player.targetModelRotation.y;
+        let currentModelY = player.mesh.rotation.y;
+        
+        // Handle angle wrapping for model rotation
+        let modelDiff = targetModelY - currentModelY;
+        if (modelDiff > Math.PI) modelDiff -= Math.PI * 2;
+        if (modelDiff < -Math.PI) modelDiff += Math.PI * 2;
+        
+        player.mesh.rotation.y += modelDiff * 0.3;
+      }
+      
+      // Make name tag face camera (it's the last child after Mohamed model is loaded)
+      const nameTag = player.group.children[player.group.children.length - 1];
+      if (nameTag && nameTag.isSprite) {
+        nameTag.lookAt(this.camera.position);
+      }
+    });
+  }
+  
+  disconnect() {
+    this.stopUpdateLoop();
+    this.closeWS();
+  }
+  
+  getPlayerCount() {
+    return this.remotePlayers.size + 1; // +1 for local player
+  }
+}

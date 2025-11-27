@@ -34,3 +34,54 @@ Notes and possible improvements
 - Add more animations from the assets folder (dead, boxing, dance moves, etc.)
 - Add better physics with a library (Cannon.js, Ammo.js, Rapier).
 - Add a shift key to toggle between walk and run speeds explicitly.
+
+---
+
+## 📚 Documentation
+
+### Core Documentation
+- **[Complete System Overview](documentation/COMPLETE_SYSTEM_OVERVIEW.md)** - Full system architecture and how everything works together
+- **[Multiplayer Features](documentation/MULTIPLAYER_FEATURES.md)** - Multiplayer system documentation
+- **[README Multiplayer](documentation/README_MULTIPLAYER.md)** - Multiplayer setup and usage guide
+
+### Server Documentation
+- **[Go Server README](documentation/README_GO_SERVER.md)** - Go backend server documentation
+- **[Flask README](documentation/README_FLASK.md)** - Original Flask server documentation (legacy)
+
+### Performance & Optimization
+- **[Network Optimization](documentation/NETWORK_OPTIMIZATION.md)** - Network optimization techniques and implementation
+- **[Optimization Visual Guide](documentation/OPTIMIZATION_VISUAL_GUIDE.md)** - Visual diagrams explaining optimizations
+- **[Go Metrics Guide](documentation/GO_METRICS_GUIDE.md)** - Go runtime metrics monitoring guide
+
+### Monitoring & Analysis
+- **[Monitoring README](monitoring/README.md)** - Monitoring stack setup (Prometheus + Grafana)
+- **[Python Analysis Script](monitoring/analyze-metrics.py)** - Advanced metrics analysis tool
+- **[Bash Analysis Script](monitoring/analyze-metrics.sh)** - Quick metrics analysis tool
+
+### Quick Links
+- 📊 **Grafana Dashboard**: http://localhost:3000 (admin/admin)
+- 🔍 **Prometheus**: http://localhost:9090
+- 📈 **Metrics Endpoint**: http://localhost:5500/metrics
+
+---
+
+## 🚀 Quick Start
+
+### Development Mode
+```bash
+# Start the game server
+./game-server
+
+# Or with monitoring stack
+docker-compose -f docker-compose.monitoring.yml up -d
+./game-server
+```
+
+### View Documentation
+```bash
+# Open documentation folder
+cd documentation/
+
+# Start with the complete overview
+cat COMPLETE_SYSTEM_OVERVIEW.md
+```

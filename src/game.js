@@ -4,11 +4,22 @@
 // - Pointer lock for mouse-look
 // - Animation blending (idle, walk, run)
 
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
-import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js';
+import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { MainMenu } from './mainMenu.js';
+import { MultiplayerClient } from './multiplayer.js';
+
+// Make THREE, GLTFLoader, DRACOLoader, MeshoptDecoder and SkeletonUtils globally available for multiplayer module
+window.THREE = THREE;
+window.GLTFLoader = GLTFLoader;
+window.DRACOLoader = DRACOLoader;
+window.MeshoptDecoder = MeshoptDecoder;
+window.SkeletonUtils = SkeletonUtils;
 
 const KRISTIAN_APP = "https://kruger-cuisine-martial-storage.trycloudflare.com/"
 const KRISTIAN_SCREENSHOT = "./assets/kristianScreenshot.png"
@@ -131,19 +142,21 @@ loadingManager.onProgress = function(url, itemsLoaded, itemsTotal) {
   const progress = (itemsLoaded / itemsTotal) * 100;
   loadingBar.style.width = progress + '%';
   loadingText.textContent = Math.round(progress) + '%';
-  console.log('Loading: ' + Math.round(progress) + '%');
+  
+  // Show what's currently loading
+  const filename = url.split('/').pop();
+  if (filename) {
+    loadingText.textContent = `${Math.round(progress)}% - ${filename}`;
+  }
 };
 
 loadingManager.onLoad = function() {
-  console.log('All assets loaded!');
-  // Fade out loading screen after a short delay
+  console.log('Critical assets loaded! Starting game...');
+  // Remove loading screen immediately for faster game start
+  loadingScreen.classList.add('fade-out');
   setTimeout(() => {
-    loadingScreen.classList.add('fade-out');
-    // Remove from DOM after fade completes
-    setTimeout(() => {
-      loadingScreen.style.display = 'none';
-    }, 500);
-  }, 500);
+    loadingScreen.style.display = 'none';
+  }, 300); // Reduced from 500ms
 };
 
 loadingManager.onError = function(url) {
@@ -156,6 +169,9 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const container = document.getElementById('canvas-container');
+
+// Hide the game canvas initially (show when session starts)
+container.style.display = 'none';
 
 // Renderer with aggressive optimization
 const renderer = new THREE.WebGLRenderer({ 
@@ -582,6 +598,10 @@ let mohamedModel = null;
 let mixer = null;
 let animations = {};
 let currentAction = null;
+let isPlayingSpecialAnimation = false; // Flag to prevent movement animations from interrupting special animations
+
+// Global cache for Mohamed animations to share with remote players
+window.mohamedAnimationCache = null;
 
 // Audio setup
 const audioListener = new THREE.AudioListener();
@@ -647,8 +667,6 @@ audioLoader.load('./assets/Vimmersvej.mp3', (buffer) => {
   themeSound.setRolloffFactor(2.0); // Very aggressive volume falloff
   themeSound.setDistanceModel('exponential'); // Exponential falloff for dramatic distance effect
 });
-
-
 
 audioLoader.load('./assets/walking_elephant.m4a', (buffer) => {
   walkingSound.setBuffer(buffer);
@@ -733,7 +751,19 @@ class CachedGLTFLoader extends GLTFLoader {
   }
 }
 
+// Setup DRACO loader for compressed models
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+dracoLoader.setDecoderConfig({ type: 'js' });
+
 const loader = new CachedGLTFLoader();
+loader.setDRACOLoader(dracoLoader);
+loader.setMeshoptDecoder(MeshoptDecoder);
+
+// Create a separate loader for background assets (not tracked by loading manager)
+const backgroundLoader = new CachedGLTFLoader(new THREE.LoadingManager());
+backgroundLoader.setDRACOLoader(dracoLoader);
+backgroundLoader.setMeshoptDecoder(MeshoptDecoder);
 
 // Load the character model and animations
 Promise.all([
@@ -751,8 +781,26 @@ Promise.all([
   }),
   new Promise((resolve, reject) => {
     loader.load('./assets/mohamed/Animation_Run_03_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Agree_Gesture_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_All_Night_Dance_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Boom_Dance_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Boxing_Practice_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Dead_withSkin.glb', resolve, undefined, reject);
+  }),
+  new Promise((resolve, reject) => {
+    loader.load('./assets/mohamed/Animation_Skill_01_withSkin.glb', resolve, undefined, reject);
   })
-]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf]) => {
+]).then(([characterGltf, idleGltf, walkGltf, runGltf, swimGltf, agreeGltf, danceGltf, boomGltf, boxingGltf, deadGltf, skillGltf]) => {
   mohamedModel = characterGltf.scene;
   mohamedModel.traverse((node) => {
     if (node.isMesh) {
@@ -772,13 +820,63 @@ Promise.all([
   animations.run = mixer.clipAction(runGltf.animations[0]);
   animations.swim = mixer.clipAction(swimGltf.animations[0]);
   
+  // Special animations - set to play once (not loop)
+  animations.agree = mixer.clipAction(agreeGltf.animations[0]);
+  animations.agree.setLoop(THREE.LoopOnce, 1);
+  animations.agree.clampWhenFinished = true;
+  
+  animations.dance = mixer.clipAction(danceGltf.animations[0]);
+  animations.dance.setLoop(THREE.LoopOnce, 1);
+  animations.dance.clampWhenFinished = true;
+  
+  animations.boom = mixer.clipAction(boomGltf.animations[0]);
+  animations.boom.setLoop(THREE.LoopOnce, 1);
+  animations.boom.clampWhenFinished = true;
+  
+  animations.boxing = mixer.clipAction(boxingGltf.animations[0]);
+  animations.boxing.setLoop(THREE.LoopOnce, 1);
+  animations.boxing.clampWhenFinished = true;
+  
+  animations.dead = mixer.clipAction(deadGltf.animations[0]);
+  animations.dead.setLoop(THREE.LoopOnce, 1);
+  animations.dead.clampWhenFinished = true;
+  
+  animations.skill = mixer.clipAction(skillGltf.animations[0]);
+  animations.skill.setLoop(THREE.LoopOnce, 1);
+  animations.skill.clampWhenFinished = true;
+  
   // Start with idle
   animations.idle.play();
   currentAction = animations.idle;
   
-  console.log('Mohamed loaded with animations!');
+  // Cache the loaded GLTF animations globally for remote players to reuse
+  window.mohamedAnimationCache = {
+    character: characterGltf,
+    idle: idleGltf,
+    walk: walkGltf,
+    run: runGltf,
+    swim: swimGltf,
+    agree: agreeGltf,
+    dance: danceGltf,
+    boom: boomGltf,
+    boxing: boxingGltf,
+    dead: deadGltf,
+    skill: skillGltf
+  };
+  
+  // Update multiplayer client with Mohamed model for rotation sync
+  if (multiplayerClient) {
+    multiplayerClient.setMohamedModel(mohamedModel);
+  }
+  
+  console.log('Mohamed loaded with animations and cached for remote players!');
 }).catch(err => {
   console.error('Error loading Mohamed:', err);
+  console.error('Error details:', {
+    message: err.message,
+    stack: err.stack,
+    name: err.name
+  });
   // Fallback: add a visible box if model fails to load
   const fallback = new THREE.Mesh(
     new THREE.BoxGeometry(1, 2, 1),
@@ -788,30 +886,21 @@ Promise.all([
   character.add(fallback);
 });
 
-// Simple obstacles
-for (let i = 0; i < 8; i++) {
-  const b = new THREE.Mesh(
-    new THREE.BoxGeometry(1 + Math.random() * 3, 1 + Math.random() * 4, 1 + Math.random() * 3),
-    new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
-  );
-  b.position.set((Math.random() - 0.5) * 40, b.geometry.parameters.height / 2, (Math.random() - 0.5) * 40);
-  b.castShadow = true;
-  b.receiveShadow = true;
-  scene.add(b);
-}
-
 // Load Castle of Loarre at the edge of the world
 let venueModel = null;
 let ocamlModel = null;
 
 // Castle meshes for BVH collision
 let venueMeshes = [];
+let castleMeshes = [];
 
 // Screenshot and iframe functionality
 let screenshotMesh = null;
 let venueIframe = null;
 let venueCSS3DObject = null;
 let isVenueIframeVisible = false;
+let iframeClosedTime = 0; // Timestamp when iframe was closed
+const IFRAME_COOLDOWN_MS = 500; // Cooldown period in milliseconds
 
 loader.load('./assets/venue.glb', (gltf) => {
   venueModel = gltf.scene;
@@ -1021,8 +1110,8 @@ function optimizeModel(model) {
   console.log(`Optimized model: ${meshCount} meshes, ${totalVertices} vertices total`);
 }
 
-// Load Boris Johnson inside the venue
-loader.load('./assets/boris.glb', (borisGltf) => {
+// Load Boris Johnson inside the venue (background loading - doesn't block game start)
+backgroundLoader.load('./assets/boris.glb', (borisGltf) => {
   borisModel = borisGltf.scene;
   
   // Scale Boris
@@ -1083,19 +1172,30 @@ loader.load('./assets/boris.glb', (borisGltf) => {
   console.error('Error loading Boris Johnson:', err);
 });
 
-// Create cinema-style screen with iframe
-// const iframe = document.createElement('iframe');
-// iframe.src = 'https://bytes-theta-gets-interior.trycloudflare.com/';
-// iframe.style.width = '1920px';
-// iframe.style.height = '1080px';
-// iframe.style.border = '0';
-// iframe.style.pointerEvents = 'auto'; // Enable interaction with iframe
-
-// const css3DObject = new CSS3DObject(iframe);
-// css3DObject.position.set(50, 15, 50); // Position near spawn
-// css3DObject.rotation.y = (Math.PI*1.2) ; // Angle towards spawn
-// css3DObject.scale.set(0.02, 0.02, 0.02); // Scale down to reasonable size
-// //scene.add(css3DObject);
+// Load Castle of Loarre in the background (background loading - doesn't block game start)
+backgroundLoader.load('./assets/castle_of_loarre.glb', (gltf) => {
+  const castleModel = gltf.scene;
+  
+  // Scale the castle appropriately
+  castleModel.scale.set(1, 1, 1);
+  
+  // Position castle in the distance (far from spawn area)
+  castleModel.position.set(300, 7.45, 300);
+  
+  // Enable shadows
+  castleModel.traverse((node) => {
+    if (node.isMesh) {
+      node.castShadow = true;
+      node.receiveShadow = true;
+      castleMeshes.push(node);
+    }
+  });
+  
+  scene.add(castleModel);
+  console.log('Castle of Loarre placed in background at:', castleModel.position);
+}, undefined, (err) => {
+  console.error('Error loading Castle of Loarre:', err);
+});
 
 // Cinema button variables
 let leftCinemaButton = null;
@@ -1184,7 +1284,7 @@ function switchCinemaImage(imageType) {
 }
 
 // Function to show venue iframe
-function showVenueIframe(url = "MIKKEL_APP") {
+function showVenueIframe(url = MIKKEL_APP) {
   if (!venueIframe) {
     // Create container for iframe with close button
     const iframeContainer = document.createElement('div');
@@ -1315,8 +1415,11 @@ function hideVenueIframe() {
     }
     isVenueIframeVisible = false;
     
-    // Only try to re-lock pointer on desktop (not mobile)
-    if (!('ontouchstart' in window)) {
+    // Set cooldown timestamp to prevent immediate re-opening
+    iframeClosedTime = Date.now();
+    
+    // Only try to re-lock pointer on desktop (not mobile) and if game has started
+    if (!('ontouchstart' in window) && gameStarted) {
       renderer.domElement.requestPointerLock();
     }
     
@@ -1342,72 +1445,6 @@ let isCinemaMode = false;
 const clickRaycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// Request pointer lock on click
-document.addEventListener('click', (event) => {
-  if (isPointerLocked) {
-    // Calculate mouse position in normalized device coordinates (-1 to +1)
-    mouse.x = 0; // Center of screen in pointer lock
-    mouse.y = 0;
-    
-    clickRaycaster.setFromCamera(mouse, camera);
-    
-    // Check for cinema button clicks
-    if (leftCinemaButton && rightCinemaButton) {
-      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
-      if (buttonIntersects.length > 0) {
-        const clickedButton = buttonIntersects[0].object;
-        if (clickedButton.userData.buttonType) {
-          switchCinemaImage(clickedButton.userData.buttonType);
-          return;
-        }
-      }
-    }
-    
-    // Check if clicking on screenshot
-    if (screenshotMesh) {
-      const intersects = clickRaycaster.intersectObject(screenshotMesh);
-      if (intersects.length > 0) {
-        // Clicked on screenshot - show iframe with URL based on current image
-        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
-        showVenueIframe(url);
-        console.log('Opening iframe with:', url);
-        return;
-      }
-    }
-  }
-  
-  renderer.domElement.requestPointerLock();
-});
-
-// Track pointer lock state
-document.addEventListener('pointerlockchange', () => {
-  isPointerLocked = document.pointerLockElement === renderer.domElement;
-  
-  // Start theme music on first pointer lock (user interaction)
-  if (isPointerLocked && themeSound.buffer && !themeSound.isPlaying) {
-    themeSound.play();
-    console.log('Theme music started!');
-  }
-  
-  if (!isPointerLocked && isCinemaMode) {
-    // Exited pointer lock while in cinema mode - exit cinema mode
-    isCinemaMode = false;
-    cssRenderer.domElement.style.pointerEvents = 'none';
-  }
-});
-
-// Mouse movement for camera rotation
-document.addEventListener('mousemove', (e) => {
-  if (!isPointerLocked) return;
-  
-  const sensitivity = 0.003;
-  cameraYaw -= e.movementX * sensitivity;
-  cameraPitch -= e.movementY * sensitivity;
-  
-  // Clamp pitch to prevent camera flipping
-  cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
-});
-
 // Movement state
 const move = { forward: 0, right: 0, up: 0, sprint: false };
 let canJump = true;
@@ -1415,13 +1452,19 @@ let velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 
 function onKeyDown(e) {
-  // Check for Escape key to close venue iframe
-  if (e.code === 'Escape' && isVenueIframeVisible) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideVenueIframe();
-    console.log('Escape pressed - closing iframe');
-    return;
+  // Check for Escape key to close venue iframe or return to menu
+  if (e.code === 'Escape') {
+    if (isVenueIframeVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideVenueIframe();
+      console.log('Escape pressed - closing iframe');
+      return;
+    } else if (gameStarted) {
+      // Return to main menu
+      goToMainMenu();
+      return;
+    }
   }
 
   if (isVenueIframeVisible) return
@@ -1463,8 +1506,64 @@ function onKeyDown(e) {
         // Re-lock pointer and disable cinema interaction
         isCinemaMode = false;
         cssRenderer.domElement.style.pointerEvents = 'none';
-        renderer.domElement.requestPointerLock();
+        if (gameStarted) {
+          renderer.domElement.requestPointerLock();
+        }
         console.log('Cinema mode disabled - pointer locked');
+      }
+      break;
+    case 'KeyF':
+      // Agree gesture animation
+      if (animations.agree) {
+        fadeToAction(animations.agree, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('agree');
+        }
+      }
+      break;
+    case 'KeyG':
+      // All night dance animation
+      if (animations.dance) {
+        fadeToAction(animations.dance, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('dance');
+        }
+      }
+      break;
+    case 'KeyH':
+      // Boom dance animation
+      if (animations.boom) {
+        fadeToAction(animations.boom, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('boom');
+        }
+      }
+      break;
+    case 'KeyJ':
+      // Boxing practice animation
+      if (animations.boxing) {
+        fadeToAction(animations.boxing, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('boxing');
+        }
+      }
+      break;
+    case 'KeyK':
+      // Dead animation
+      if (animations.dead) {
+        fadeToAction(animations.dead, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('dead');
+        }
+      }
+      break;
+    case 'KeyL':
+      // Skill animation
+      if (animations.skill) {
+        fadeToAction(animations.skill, 0.3, true);
+        if (multiplayerClient) {
+          multiplayerClient.triggerSound('skill');
+        }
       }
       break;
   }
@@ -1487,18 +1586,6 @@ function onKeyUp(e) {
       break;
   }
 }
-document.addEventListener('keydown', onKeyDown);
-document.addEventListener('keyup', onKeyUp);
-
-// Additional escape key handler with capture to prevent iframe from consuming it
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' && isVenueIframeVisible) {
-    e.preventDefault();
-    e.stopPropagation();
-    hideVenueIframe();
-    console.log('Window escape handler - closing iframe');
-  }
-}, true); // Use capture phase
 
 // Mobile controls
 const joystickContainer = document.getElementById('joystick-container');
@@ -1509,71 +1596,6 @@ let joystickActive = false;
 let joystickCenter = { x: 0, y: 0 };
 let joystickDelta = { x: 0, y: 0 };
 
-if (joystickContainer) {
-  // Joystick touch handling
-  joystickContainer.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    joystickActive = true;
-    const rect = joystickContainer.getBoundingClientRect();
-    joystickCenter.x = rect.left + rect.width / 2;
-    joystickCenter.y = rect.top + rect.height / 2;
-  });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!joystickActive) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    const deltaX = touch.clientX - joystickCenter.x;
-    const deltaY = touch.clientY - joystickCenter.y;
-    
-    const maxDistance = 35; // Maximum joystick travel distance
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    
-    if (distance < maxDistance) {
-      joystickDelta.x = deltaX / maxDistance;
-      joystickDelta.y = deltaY / maxDistance;
-      joystickStick.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
-    } else {
-      const angle = Math.atan2(deltaY, deltaX);
-      const limitedX = Math.cos(angle) * maxDistance;
-      const limitedY = Math.sin(angle) * maxDistance;
-      joystickDelta.x = limitedX / maxDistance;
-      joystickDelta.y = limitedY / maxDistance;
-      joystickStick.style.transform = `translate(calc(-50% + ${limitedX}px), calc(-50% + ${limitedY}px))`;
-    }
-    
-    // Update movement state based on joystick
-    move.forward = -joystickDelta.y; // Inverted Y for forward/back
-    move.right = -joystickDelta.x; // Inverted X for left/right
-  });
-
-  document.addEventListener('touchend', (e) => {
-    if (!joystickActive) return;
-    joystickActive = false;
-    joystickDelta.x = 0;
-    joystickDelta.y = 0;
-    joystickStick.style.transform = 'translate(-50%, -50%)';
-    
-    // Reset movement
-    move.forward = 0;
-    move.right = 0;
-  });
-}
-
-if (jumpButton) {
-  jumpButton.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (canJump) {
-      velocity.y += 10;
-      canJump = false;
-      if (jumpingSound.buffer && !jumpingSound.isPlaying) {
-        jumpingSound.play();
-      }
-    }
-  });
-}
-
 // Mobile touch controls for camera rotation
 let isTouchRotating = false;
 let touchStartX = 0;
@@ -1583,130 +1605,6 @@ let lastTouchX = 0;
 let lastTouchY = 0;
 let hasDragged = false;
 
-document.addEventListener('touchstart', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchstart blocked - iframe is visible');
-    return;
-  }
-  
-  // Only handle camera rotation if touching outside controls
-  const touch = e.touches[0];
-  const touchX = touch.clientX;
-  const touchY = touch.clientY;
-  
-  // Check if touch is in upper 2/3 of screen (not on controls)
-  if (touchY < window.innerHeight * 0.66) {
-    e.preventDefault(); // Prevent page scrolling
-    isTouchRotating = true;
-    touchStartX = touchX;
-    touchStartY = touchY;
-    touchStartTime = Date.now();
-    lastTouchX = touchX;
-    lastTouchY = touchY;
-    hasDragged = false;
-    console.log('Camera rotation started');
-  }
-}, { passive: false });
-
-document.addEventListener('touchmove', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchmove blocked - iframe is visible');
-    return;
-  }
-  if (!isTouchRotating) return;
-  
-  // Prevent page scrolling
-  e.preventDefault();
-  
-  const touch = e.touches[0];
-  const deltaX = touch.clientX - lastTouchX;
-  const deltaY = touch.clientY - lastTouchY;
-  
-  // Check if user has dragged enough to be considered camera rotation (not a tap)
-  const totalDragDistance = Math.sqrt(
-    Math.pow(touch.clientX - touchStartX, 2) + 
-    Math.pow(touch.clientY - touchStartY, 2)
-  );
-  
-  if (totalDragDistance > 10) { // Threshold for distinguishing tap from drag
-    hasDragged = true;
-  }
-  
-  const sensitivity = 0.005;
-  cameraYaw -= deltaX * sensitivity;
-  cameraPitch -= deltaY * sensitivity;
-  
-  // Clamp pitch
-  cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
-  
-  lastTouchX = touch.clientX;
-  lastTouchY = touch.clientY;
-}, { passive: false });
-
-document.addEventListener('touchend', (e) => {
-  // Don't handle game touches when iframe is open
-  if (isVenueIframeVisible) {
-    console.log('touchend blocked - iframe is visible');
-    return;
-  }
-  
-  // Only process tap if we were tracking a touch
-  if (!isTouchRotating) return;
-  
-  // Check if this was a tap (not dragged and quick)
-  const touchDuration = Date.now() - touchStartTime;
-  const wasTap = !hasDragged && touchDuration < 300; // Less than 300ms = tap
-  
-  if (wasTap && e.changedTouches && e.changedTouches.length > 0) {
-    const touch = e.changedTouches[0];
-    
-    console.log('Tap detected at:', touch.clientX, touch.clientY);
-    
-    // Convert touch coordinates to normalized device coordinates
-    mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
-    
-    clickRaycaster.setFromCamera(mouse, camera);
-    
-    // Check for cinema button clicks
-    if (leftCinemaButton && rightCinemaButton) {
-      const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
-      if (buttonIntersects.length > 0) {
-        const clickedButton = buttonIntersects[0].object;
-        if (clickedButton.userData.buttonType) {
-          console.log('Cinema button tapped:', clickedButton.userData.buttonType);
-          switchCinemaImage(clickedButton.userData.buttonType);
-          isTouchRotating = false;
-          hasDragged = false;
-          return;
-        }
-      }
-    }
-    
-    // Check if tapping on screenshot
-    if (screenshotMesh) {
-      const intersects = clickRaycaster.intersectObject(screenshotMesh);
-      if (intersects.length > 0) {
-        console.log('Screenshot tapped! Opening iframe...');
-        // Tapped on screenshot - show iframe with URL based on current image
-        const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
-        showVenueIframe(url);
-        isTouchRotating = false;
-        hasDragged = false;
-        return;
-      } else {
-        console.log('No intersection with screenshot');
-      }
-    }
-  }
-  
-  // Reset state
-  isTouchRotating = false;
-  hasDragged = false;
-});
-
 // Camera follow offset
 const cameraOffset = new THREE.Vector3(0, 4, 6);
 
@@ -1714,12 +1612,24 @@ const cameraOffset = new THREE.Vector3(0, 4, 6);
 const clock = new THREE.Clock();
 
 // Helper to smoothly transition between animations
-function fadeToAction(newAction, duration = 0.3) {
+function fadeToAction(newAction, duration = 0.3, isSpecial = false) {
   if (currentAction && currentAction !== newAction) {
     currentAction.fadeOut(duration);
   }
   newAction.reset().fadeIn(duration).play();
   currentAction = newAction;
+  
+  // If this is a special animation, set the flag and clear it when animation finishes
+  if (isSpecial) {
+    isPlayingSpecialAnimation = true;
+    
+    // Listen for animation to finish (not loop)
+    const onFinished = () => {
+      isPlayingSpecialAnimation = false;
+      mixer.removeEventListener('finished', onFinished);
+    };
+    mixer.addEventListener('finished', onFinished);
+  }
 }
 
 let desiredCamPos = null
@@ -1811,7 +1721,7 @@ function animate() {
     character.position.z += dz * speed * delta;
     
     // Check for horizontal collision with venue and OCaml
-    const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
+    const collidableMeshes = [...ocamlsMeshes, ...venueMeshes, ...castleMeshes];
     if (collidableMeshes.length > 0) {
       const horizontalRaycaster = new THREE.Raycaster();
       const playerHeight = 1.0; // Check at player's center height
@@ -1850,7 +1760,7 @@ function animate() {
   raycaster.set(rayOrigin, rayDirection);
   
   // Combine all collidable meshes
-  const collidableMeshes = [...ocamlsMeshes, ...venueMeshes];
+  const collidableMeshes = [...ocamlsMeshes, ...venueMeshes, ...castleMeshes];
   
   if (collidableMeshes.length > 0) {
     // Check intersection with all meshes
@@ -1890,29 +1800,31 @@ function animate() {
     
     canJump = false; // Can't jump while swimming
     
-    // Swimming animation
-    if (isMoving && animations.swim) {
-      if (currentAction !== animations.swim) {
-        fadeToAction(animations.swim);
-      }
-      // Play swimming sound
-      if (swimmingSound.buffer && !swimmingSound.isPlaying) {
-        swimmingSound.play();
-      }
-      // Stop walking and running sound if playing
-      if (runningSound.isPlaying) {
-        runningSound.stop();
-      }
-      if (walkingSound.isPlaying) {
-        walkingSound.stop();
-      }
-    } else {
-      if (animations.idle && currentAction !== animations.idle) {
-        fadeToAction(animations.idle);
-      }
-      // Stop swimming sound when idle
-      if (swimmingSound.isPlaying) {
-        swimmingSound.stop();
+    // Swimming animation (only if not playing special animation)
+    if (!isPlayingSpecialAnimation) {
+      if (isMoving && animations.swim) {
+        if (currentAction !== animations.swim) {
+          fadeToAction(animations.swim);
+        }
+        // Play swimming sound
+        if (swimmingSound.buffer && !swimmingSound.isPlaying) {
+          swimmingSound.play();
+        }
+        // Stop walking and running sound if playing
+        if (runningSound.isPlaying) {
+          runningSound.stop();
+        }
+        if (walkingSound.isPlaying) {
+          walkingSound.stop();
+        }
+      } else {
+        if (animations.idle && currentAction !== animations.idle) {
+          fadeToAction(animations.idle);
+        }
+        // Stop swimming sound when idle
+        if (swimmingSound.isPlaying) {
+          swimmingSound.stop();
+        }
       }
     }
     
@@ -1929,40 +1841,42 @@ function animate() {
       canJump = true;
     }
     
-    // Animation blending based on speed (on land)
-    if (isMoving) {
-      const isRunning = move.sprint;
-      if (animations.run && animations.walk && isRunning) {
-        if (currentAction !== animations.run) {
-          fadeToAction(animations.run);
+    // Animation blending based on speed (on land) - only if not playing special animation
+    if (!isPlayingSpecialAnimation) {
+      if (isMoving) {
+        const isRunning = move.sprint;
+        if (animations.run && animations.walk && isRunning) {
+          if (currentAction !== animations.run) {
+            fadeToAction(animations.run);
+          }
+          if (!runningSound.isPlaying) runningSound.play();  
+          if (walkingSound.isPlaying) walkingSound.stop();
+      } else if (animations.walk) {
+          if (currentAction !== animations.walk) {
+            fadeToAction(animations.walk);
+          }
+          // Play walking sound
+          if(!walkingSound.isPlaying) walkingSound.play();
+          if (runningSound.isPlaying) runningSound.stop();
         }
-        if (!runningSound.isPlaying) runningSound.play();  
-        if (walkingSound.isPlaying) walkingSound.stop();
-    } else if (animations.walk) {
-        if (currentAction !== animations.walk) {
-          fadeToAction(animations.walk);
+        
+        
+        // Stop swimming sound if playing
+        if (swimmingSound.isPlaying) {
+          swimmingSound.stop();
         }
-        // Play walking sound
-        if(!walkingSound.isPlaying) walkingSound.play();
-        if (runningSound.isPlaying) runningSound.stop();
-      }
-      
-      
-      // Stop swimming sound if playing
-      if (swimmingSound.isPlaying) {
-        swimmingSound.stop();
-      }
-    } else {
-      // Idle animation when not moving
-      if (animations.idle && currentAction !== animations.idle) {
-        fadeToAction(animations.idle);
-      }
-      // Stop walking sound when idle
-      if (walkingSound.isPlaying) {
-        walkingSound.stop();
-      }
-      if (runningSound.isPlaying) {
-        runningSound.stop();
+      } else {
+        // Idle animation when not moving
+        if (animations.idle && currentAction !== animations.idle) {
+          fadeToAction(animations.idle);
+        }
+        // Stop walking sound when idle
+        if (walkingSound.isPlaying) {
+          walkingSound.stop();
+        }
+        if (runningSound.isPlaying) {
+          runningSound.stop();
+        }
       }
     }
     
@@ -2011,16 +1925,40 @@ function animate() {
     coordsElement.textContent = `Position: X: ${character.position.x.toFixed(1)}, Y: ${character.position.y.toFixed(1)}, Z: ${character.position.z.toFixed(1)}`;
   }
 
+  // Update multiplayer
+  if (multiplayerClient) {
+    multiplayerClient.update(delta);
+    
+    // Update current animation state for multiplayer
+    if (currentAction) {
+      if (currentAction === animations.idle) {
+        currentAnimationState = 'idle';
+      } else if (currentAction === animations.walk) {
+        currentAnimationState = 'walk';
+      } else if (currentAction === animations.run) {
+        currentAnimationState = 'run';
+      } else if (currentAction === animations.swim) {
+        currentAnimationState = 'swim';
+      } else if (currentAction === animations.agree) {
+        currentAnimationState = 'agree';
+      } else if (currentAction === animations.dance) {
+        currentAnimationState = 'dance';
+      } else if (currentAction === animations.boom) {
+        currentAnimationState = 'boom';
+      } else if (currentAction === animations.boxing) {
+        currentAnimationState = 'boxing';
+      } else if (currentAction === animations.dead) {
+        currentAnimationState = 'dead';
+      } else if (currentAction === animations.skill) {
+        currentAnimationState = 'skill';
+      }
+      multiplayerClient.setCurrentAnimation(currentAnimationState);
+    }
+  }
+
   renderer.render(scene, camera);
   cssRenderer.render(scene, camera); // Render CSS3D layer
 }
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  cssRenderer.setSize(window.innerWidth, window.innerHeight);
-});
 
 // Put the camera initially behind the character
 const distance = cameraOffset.z;
@@ -2032,8 +1970,396 @@ camera.position.set(
 );
 camera.lookAt(character.position);
 
-// Start animation loop (theme music will start on first user click)
-animate();
+// Initialize multiplayer client
+let multiplayerClient = null;
+let currentAnimationState = 'idle';
+let gameStarted = false; // Flag to prevent pointer lock until game starts
+
+function setupEventHandlers() {
+  // Click handler for pointer lock and object interaction
+  document.addEventListener('click', (event) => {
+    if (isPointerLocked) {
+      // Calculate mouse position in normalized device coordinates (-1 to +1)
+      mouse.x = 0; // Center of screen in pointer lock
+      mouse.y = 0;
+      
+      clickRaycaster.setFromCamera(mouse, camera);
+      
+      // Check for cinema button clicks
+      if (leftCinemaButton && rightCinemaButton) {
+        const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+        if (buttonIntersects.length > 0) {
+          const clickedButton = buttonIntersects[0].object;
+          if (clickedButton.userData.buttonType) {
+            switchCinemaImage(clickedButton.userData.buttonType);
+            return;
+          }
+        }
+      }
+      
+      // Check if clicking on screenshot
+      if (screenshotMesh) {
+        const intersects = clickRaycaster.intersectObject(screenshotMesh);
+        if (intersects.length > 0) {
+          // Check cooldown to prevent immediate re-opening after closing
+          const timeSinceClose = Date.now() - iframeClosedTime;
+          if (timeSinceClose < IFRAME_COOLDOWN_MS) {
+            console.log('Screenshot click blocked by cooldown:', timeSinceClose, 'ms');
+            return;
+          }
+          
+          // Clicked on screenshot - show iframe with URL based on current image
+          const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+          showVenueIframe(url);
+          console.log('Opening iframe with:', url);
+          return;
+        }
+      }
+    }
+    
+    // Only request pointer lock if the game has started
+    if (gameStarted) {
+      renderer.domElement.requestPointerLock();
+    }
+  });
+
+  // Track pointer lock state
+  document.addEventListener('pointerlockchange', () => {
+    isPointerLocked = document.pointerLockElement === renderer.domElement;
+    
+    // Start theme music on first pointer lock (user interaction)
+    if (isPointerLocked && themeSound.buffer && !themeSound.isPlaying) {
+      themeSound.play();
+      console.log('Theme music started!');
+    }
+    
+    if (!isPointerLocked && isCinemaMode) {
+      // Exited pointer lock while in cinema mode - exit cinema mode
+      isCinemaMode = false;
+      cssRenderer.domElement.style.pointerEvents = 'none';
+    }
+  });
+
+  // Mouse movement for camera rotation
+  document.addEventListener('mousemove', (e) => {
+    if (!isPointerLocked) return;
+    
+    const sensitivity = 0.003;
+    cameraYaw -= e.movementX * sensitivity;
+    cameraPitch -= e.movementY * sensitivity;
+    
+    // Clamp pitch to prevent camera flipping
+    cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
+  });
+
+  // Keyboard event handlers
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+
+  // Additional escape key handler with capture to prevent iframe from consuming it
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && isVenueIframeVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideVenueIframe();
+      console.log('Window escape handler - closing iframe');
+    }
+  }, true); // Use capture phase
+
+  // Mobile joystick controls
+  if (joystickContainer) {
+    // Joystick touch handling
+    joystickContainer.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      joystickActive = true;
+      const rect = joystickContainer.getBoundingClientRect();
+      joystickCenter.x = rect.left + rect.width / 2;
+      joystickCenter.y = rect.top + rect.height / 2;
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!joystickActive) return;
+      e.preventDefault();
+      
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - joystickCenter.x;
+      const deltaY = touch.clientY - joystickCenter.y;
+      
+      const maxDistance = 35; // Maximum joystick travel distance
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      
+      if (distance < maxDistance) {
+        joystickDelta.x = deltaX / maxDistance;
+        joystickDelta.y = deltaY / maxDistance;
+        joystickStick.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
+      } else {
+        const angle = Math.atan2(deltaY, deltaX);
+        const limitedX = Math.cos(angle) * maxDistance;
+        const limitedY = Math.sin(angle) * maxDistance;
+        joystickDelta.x = limitedX / maxDistance;
+        joystickDelta.y = limitedY / maxDistance;
+        joystickStick.style.transform = `translate(calc(-50% + ${limitedX}px), calc(-50% + ${limitedY}px))`;
+      }
+      
+      // Update movement state based on joystick
+      move.forward = -joystickDelta.y; // Inverted Y for forward/back
+      move.right = -joystickDelta.x; // Inverted X for left/right
+    });
+
+    document.addEventListener('touchend', (e) => {
+      if (!joystickActive) return;
+      joystickActive = false;
+      joystickDelta.x = 0;
+      joystickDelta.y = 0;
+      joystickStick.style.transform = 'translate(-50%, -50%)';
+      
+      // Reset movement
+      move.forward = 0;
+      move.right = 0;
+    });
+  }
+
+  // Mobile jump button
+  if (jumpButton) {
+    jumpButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (canJump) {
+        velocity.y += 10;
+        canJump = false;
+        if (jumpingSound.buffer && !jumpingSound.isPlaying) {
+          jumpingSound.play();
+        }
+      }
+    });
+  }
+
+  // Mobile touch controls for camera rotation
+  document.addEventListener('touchstart', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchstart blocked - iframe is visible');
+      return;
+    }
+    
+    // Only handle camera rotation if touching outside controls
+    const touch = e.touches[0];
+    const touchX = touch.clientX;
+    const touchY = touch.clientY;
+    
+    // Check if touch is in upper 2/3 of screen (not on controls)
+    if (touchY < window.innerHeight * 0.66) {
+      e.preventDefault(); // Prevent page scrolling
+      isTouchRotating = true;
+      touchStartX = touchX;
+      touchStartY = touchY;
+      touchStartTime = Date.now();
+      lastTouchX = touchX;
+      lastTouchY = touchY;
+      hasDragged = false;
+      console.log('Camera rotation started');
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchmove blocked - iframe is visible');
+      return;
+    }
+    
+    // Don't handle game touches when main menu is visible
+    const mainMenu = document.getElementById('main-menu');
+    if (mainMenu) {
+      const displayStyle = window.getComputedStyle(mainMenu).display;
+      if (displayStyle !== 'none') {
+        return;
+      }
+    }
+    
+    if (!isTouchRotating) return;
+    
+    // Prevent page scrolling
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - lastTouchX;
+    const deltaY = touch.clientY - lastTouchY;
+    
+    // Check if user has dragged enough to be considered camera rotation (not a tap)
+    const totalDragDistance = Math.sqrt(
+      Math.pow(touch.clientX - touchStartX, 2) + 
+      Math.pow(touch.clientY - touchStartY, 2)
+    );
+    
+    if (totalDragDistance > 10) { // Threshold for distinguishing tap from drag
+      hasDragged = true;
+    }
+    
+    const sensitivity = 0.005;
+    cameraYaw -= deltaX * sensitivity;
+    cameraPitch -= deltaY * sensitivity;
+    
+    // Clamp pitch
+    cameraPitch = Math.max(-Math.PI / 2 + 0.7, Math.min(Math.PI / 2 - 0.90, cameraPitch));
+    
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    // Don't handle game touches when iframe is open
+    if (isVenueIframeVisible) {
+      console.log('touchend blocked - iframe is visible');
+      return;
+    }
+    
+    // Only process tap if we were tracking a touch
+    if (!isTouchRotating) return;
+    
+    // Check if this was a tap (not dragged and quick)
+    const touchDuration = Date.now() - touchStartTime;
+    const wasTap = !hasDragged && touchDuration < 300; // Less than 300ms = tap
+    
+    if (wasTap && e.changedTouches && e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      
+      console.log('Tap detected at:', touch.clientX, touch.clientY);
+      
+      // Convert touch coordinates to normalized device coordinates
+      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+      
+      clickRaycaster.setFromCamera(mouse, camera);
+      
+      // Check for cinema button clicks
+      if (leftCinemaButton && rightCinemaButton) {
+        const buttonIntersects = clickRaycaster.intersectObjects([leftCinemaButton, rightCinemaButton]);
+        if (buttonIntersects.length > 0) {
+          const clickedButton = buttonIntersects[0].object;
+          if (clickedButton.userData.buttonType) {
+            console.log('Cinema button tapped:', clickedButton.userData.buttonType);
+            switchCinemaImage(clickedButton.userData.buttonType);
+            isTouchRotating = false;
+            hasDragged = false;
+            return;
+          }
+        }
+      }
+      
+      // Check if tapping on screenshot
+      if (screenshotMesh) {
+        const intersects = clickRaycaster.intersectObject(screenshotMesh);
+        if (intersects.length > 0) {
+          // Check cooldown to prevent immediate re-opening after closing
+          const timeSinceClose = Date.now() - iframeClosedTime;
+          if (timeSinceClose < IFRAME_COOLDOWN_MS) {
+            console.log('Screenshot tap blocked by cooldown:', timeSinceClose, 'ms');
+            isTouchRotating = false;
+            hasDragged = false;
+            return;
+          }
+          
+          console.log('Screenshot tapped! Opening iframe...');
+          // Tapped on screenshot - show iframe with URL based on current image
+          const url = currentCinemaImage === 'kristian' ? KRISTIAN_APP : MIKKEL_APP;
+          showVenueIframe(url);
+          isTouchRotating = false;
+          hasDragged = false;
+          return;
+        } else {
+          console.log('No intersection with screenshot');
+        }
+      }
+    }
+    
+    // Reset state
+    isTouchRotating = false;
+    hasDragged = false;
+  });
+
+  // Window resize handler
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+// Function to start the game with a session ID and username
+function startGameWithSession(sessionId, username, existingWebSocket = null, playerId = null, sessionPlayers = []) {
+  console.log('Starting game with session ID:', sessionId, 'username:', username, 'playerId:', playerId, 'sessionPlayers:', sessionPlayers.length);
+  
+  // Enable pointer lock and show the game canvas
+  gameStarted = true;
+  container.style.display = 'block';
+  
+  // Validate and sanitize username
+  if (!username || !username.trim()) {
+    username = 'Player' + Math.floor(Math.random() * 1000);
+    console.log('No username provided, generated random username:', username);
+  } else {
+    username = username.trim().substring(0, 20); // Limit to 20 chars
+    localStorage.setItem('gameUsername', username);
+    console.log('Using username:', username);
+  }
+
+  try {
+    console.log('Creating MultiplayerClient with username:', username, 'and session:', sessionId);
+    if (existingWebSocket) {
+      console.log('Reusing existing WebSocket connection from menu with', sessionPlayers.length, 'existing players');
+    }
+    multiplayerClient = new MultiplayerClient(scene, camera, character, username, mohamedModel, sessionId, existingWebSocket, playerId, sessionPlayers);
+    console.log('Multiplayer MMO client initialized with username:', username);
+    
+    // Add game info display (bottom left)
+    const gameInfoEl = document.createElement('div');
+    gameInfoEl.id = 'game-info';
+    gameInfoEl.style.position = 'fixed';
+    gameInfoEl.style.bottom = '10px';
+    gameInfoEl.style.left = '10px';
+    gameInfoEl.style.padding = '10px';
+    gameInfoEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    gameInfoEl.style.color = 'white';
+    gameInfoEl.style.fontFamily = 'Arial, sans-serif';
+    gameInfoEl.style.fontSize = '14px';
+    gameInfoEl.style.borderRadius = '5px';
+    gameInfoEl.style.zIndex = '1000';
+    gameInfoEl.innerHTML = `<div>Session: ${sessionId}</div><div>Players: 1</div>`;
+    document.body.appendChild(gameInfoEl);
+    
+    // Update player count every second
+    setInterval(() => {
+      if (multiplayerClient) {
+        gameInfoEl.innerHTML = `<div>Session: ${sessionId}</div><div>Players: ${multiplayerClient.getPlayerCount()}</div>`;
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Failed to initialize multiplayer:', error);
+    console.log('Running in single-player mode');
+  }
+  
+  setupEventHandlers()
+
+  // Start animation loop (theme music will start on first user click)
+  animate();
+}
+
+
+
+// Initialize main menu instead of starting game directly
+console.log('Initializing main menu...');
+const mainMenu = new MainMenu(startGameWithSession);
+window.mainMenu = mainMenu; // Expose to window for onclick handlers
+console.log('Main menu initialized, waiting for user to select/create session');
+
+function goToMainMenu() {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirm('Return to main menu? (You will leave the current session)')) {
+        location.reload();
+    }
+}
 
 
 function makeOcaml(x, y, z, size) {
